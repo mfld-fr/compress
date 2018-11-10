@@ -3,55 +3,135 @@
 #include <stdio.h>
 #include <memory.h>
 #include <assert.h>
+#include <time.h>
+
+
+typedef unsigned int uint_t;
+
+
+// Frame to scan
 
 #define FRAME_MAX 256
 
-typedef unsigned char  byte_t;
-typedef unsigned short word_t;
+static char level_mask [FRAME_MAX];
 
 
-static void sweep (byte_t * frame, word_t flen, word_t wsize)
+// Pattern definitions
+
+struct pattern_s
 	{
-	word_t rend = flen - wsize;
-	word_t lend = rend - wsize;
+	uint_t size;
+	uint_t base;
+	uint_t count;
+	};
 
-	word_t base;
-	word_t off;
+typedef struct pattern_s pattern_t;
+
+#define PATTERN_MAX 256
+
+static pattern_t patterns [PATTERN_MAX];
+static uint_t pcount;
+
+
+// Scan frame for one pattern size
+
+static void level_scan (char * frame, uint_t flen, uint_t psize)
+	{
+	uint_t rend = flen - psize;
+	uint_t lend = rend - psize;
+
+	uint_t base;
+	uint_t off;
+
+	// Reset the level mask
+	// used to optimize the scan
+
+	memset (level_mask, 0, sizeof level_mask);
 
 	for (base = 0; base <= lend; base++)
 		{
-		word_t lbeg = base + wsize;
+		// Skip already found pattern
 
-		for (off = lbeg; off <= rend; off++)
+		if (!level_mask [base])
 			{
-			if (!memcmp (frame + base, frame + off, wsize))
+			level_mask [base] = 1;
+
+			pattern_t * p = NULL;
+
+			uint_t lbeg = base + psize;
+
+			for (off = lbeg; off <= rend; off++)
 				{
-				printf ("match: base=%u off=%u\n", base, off);
+				if (!level_mask [off] && !memcmp (frame + base, frame + off, psize))
+					{
+					printf ("match: base=%u off=%u\n", base, off);
+
+					if (!p)
+						{
+						// Create new pattern
+
+						p = &(patterns [pcount++]);
+
+						p->size = psize;
+						p->base = base;
+						p->count = 1;
+						}
+
+					p->count++;
+
+					level_mask [off] = 1;  // pattern already found there
+					off += psize - 1;  // skip end of found pattern
+					}
 				}
 			}
 		}
 	}
 
 
-static void scan (byte_t * frame, word_t flen)
-	{
-	word_t wsize;
+// Scan frame for all pattern sizes
 
-	for (wsize = 1; wsize <= (flen >> 1); wsize++)
+static void frame_scan (char * frame, uint_t flen)
+	{
+	uint_t psize;
+	uint_t pmax = flen >> 1;
+
+	// Reset found patterns
+
+	memset (patterns, 0, sizeof patterns);
+	pcount = 0;
+
+	// Scan for patterns
+
+	for (psize = 1; psize <= pmax; psize++)
 		{
-		printf ("window size=%u\n", wsize);
-		sweep (frame, flen, wsize);
+		printf ("pattern size=%u\n", psize);
+		level_scan (frame, flen, psize);
 		putchar ('\n');
 		}
+
+	// Display pattern statistics
+
+	printf ("pattern count=%u\n", pcount);
+
+	for (uint_t i = 0; i < pcount; i++)
+		{
+		pattern_t * p = &(patterns [i]);
+		printf ("pattern: size=%u base=%u count=%u save=%u\n",
+			p->size, p->base, p->count, (p->count - 1) * p->size);
+		}
+
+	putchar ('\n');
 	}
 
 
 int main (int argc, char * argv [])
 	{
-	byte_t * frame = (byte_t *) "abcdefabc";
-	word_t flen = 9;
+	clock_t clock_begin = clock ();
 
-	scan (frame, flen);
+	char * frame = "abccccabcc";
+	uint_t flen = strlen (frame);
+
+	frame_scan (frame, flen);
 
 	/*
 	FILE * f = NULL;
@@ -138,6 +218,9 @@ int main (int argc, char * argv [])
 
 	f ? fclose (f) : 0;
 	*/
+
+	clock_t clock_end = clock ();
+	printf ("elapsed=%lu\n", (clock_end - clock_begin));
 
 	return 0;
 	}
