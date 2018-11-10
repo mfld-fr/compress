@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <memory.h>
-#include <assert.h>
 #include <time.h>
+#include <error.h>
 
 
 typedef unsigned int uint_t;
@@ -13,7 +13,8 @@ typedef unsigned int uint_t;
 
 #define FRAME_MAX 256
 
-static char level_mask [FRAME_MAX];
+static char frame [FRAME_MAX];
+static char frame_mask [FRAME_MAX];
 
 
 // Pattern definitions
@@ -33,6 +34,23 @@ static pattern_t patterns [PATTERN_MAX];
 static uint_t pcount;
 
 
+// Add pattern
+
+static pattern_t * pattern_add (uint_t size, uint_t base)
+	{
+	if (pcount >= PATTERN_MAX)
+		error (1, 0, "out of pattern space");
+
+	pattern_t * p = &(patterns [pcount++]);
+
+	p->size = size;
+	p->base = base;
+	p->count = 1;
+
+	return p;
+	}
+
+
 // Scan frame for one pattern size
 
 static void level_scan (char * frame, uint_t flen, uint_t psize)
@@ -46,15 +64,15 @@ static void level_scan (char * frame, uint_t flen, uint_t psize)
 	// Reset the level mask
 	// used to optimize the scan
 
-	memset (level_mask, 0, sizeof level_mask);
+	memset (frame_mask, 0, sizeof frame_mask);
 
 	for (base = 0; base <= lend; base++)
 		{
 		// Skip already found pattern
 
-		if (!level_mask [base])
+		if (!frame_mask [base])
 			{
-			level_mask [base] = 1;
+			frame_mask [base] = 1;
 
 			pattern_t * p = NULL;
 
@@ -62,24 +80,14 @@ static void level_scan (char * frame, uint_t flen, uint_t psize)
 
 			for (off = lbeg; off <= rend; off++)
 				{
-				if (!level_mask [off] && !memcmp (frame + base, frame + off, psize))
+				if (!frame_mask [off] && !memcmp (frame + base, frame + off, psize))
 					{
 					printf ("match: base=%u off=%u\n", base, off);
 
-					if (!p)
-						{
-						// Create new pattern
-
-						p = &(patterns [pcount++]);
-
-						p->size = psize;
-						p->base = base;
-						p->count = 1;
-						}
-
+					if (!p) p = pattern_add (psize, base);
 					p->count++;
 
-					level_mask [off] = 1;  // pattern already found there
+					frame_mask [off] = 1;  // pattern already found there
 					off += psize - 1;  // skip end of found pattern
 					}
 				}
@@ -128,96 +136,37 @@ int main (int argc, char * argv [])
 	{
 	clock_t clock_begin = clock ();
 
-	char * frame = "abccccabcc";
-	uint_t flen = strlen (frame);
-
-	frame_scan (frame, flen);
-
-	/*
 	FILE * f = NULL;
 
 	while (1)
 		{
-		memset (&_nodes, 0, sizeof _nodes);
-		memset (&_frame, 0, sizeof _frame);
+		if (argc < 2)
+			error (1, 0, "missing input file as argument");
 
 		f = fopen (argv [1], "r");
 		if (!f) break;
 
+		uint_t flen = 0;
+
 		while (1)
 			{
-			int r = fgetc (f);
-			if (r < 0 || r > 255) break;
+			int c = fgetc (f);
+			if (c < 0 || c > 255) break;
 
-			word_t n = (word_t) r;
-			if (n >= NODE_MAX)
-				{
-				puts ("fatal: too many nodes");
-				abort ();
-				}
+			if (flen >= FRAME_MAX)
+				error (1, 0, "frame too long");
 
-			Node_t * node = _nodes + n;
-			if (!node->used)
-				{
-				node->used = 1;
-				node->repeat = 1;
-				node->length = 1;
-				node->pattern [0] = n;
-				node->use_count = 1;
-
-				if (n >= _node_last) _node_last = n + 1;
-				_node_count++;
-				}
-			else
-				{
-				node->use_count++;
-				}
-
-			if (_frame_len >= _FRAME_MAX)
-				{
-				puts ("fatal: frame too long");
-				abort ();
-				}
-
-			_frame [_frame_len++] = n;
+			frame [flen++] = (char) c;
 			}
 
-		puts ("initial:");
-		printf ("  length: %u\n", _frame_len);
-		printf ("  count:  %u\n", _node_count);
-		printf ("  last:   %u\n", _node_last);
+		printf ("frame length=%u\n", flen);
 		putchar ('\n');
 
-		while (1)
-			{
-			printf ("pass %u:\n", ++_pass_count);
-
-			int res = analyze ();
-			if (res < 0)
-				{
-				puts ("fatal: analyze error");
-				abort ();
-				}
-
-			putchar ('\n');
-			printf ("  frame: %u\n", _frame_len);
-			printf ("  count: %u\n", _node_count);
-			printf ("  last:  %u\n", _node_last);
-			putchar ('\n');
-
-			if (!res)
-				{
-				puts ("  no more pass");
-				putchar ('\n');
-				break;
-				}
-			}
-
+		frame_scan (frame, flen);
 		break;
 		}
 
 	f ? fclose (f) : 0;
-	*/
 
 	clock_t clock_end = clock ();
 	printf ("elapsed=%lu\n", (clock_end - clock_begin));
