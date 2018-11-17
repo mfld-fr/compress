@@ -1,3 +1,6 @@
+//------------------------------------------------------------------------------
+// Compressor
+//------------------------------------------------------------------------------
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -17,7 +20,7 @@ typedef unsigned int uint_t;
 
 static uchar_t frame_text [FRAME_MAX];
 static uchar_t frame_mask [FRAME_MAX];
-static uint_t flen;
+static uint_t frame_len;
 
 
 // Symbol definitions
@@ -25,37 +28,25 @@ static uint_t flen;
 struct symbol_s
 	{
 	uint_t base;
+	uint_t size;
 	uint_t count;
+	uint_t left;
+	uint_t right;
 	};
 
 typedef struct symbol_s symbol_t;
 
-#define SYMBOL_MAX 256
+#define BASE_MAX 256
+#define SYMBOL_MAX 65536  // 64K
 
 static symbol_t symbols [SYMBOL_MAX];
-
-
-// Pattern definitions
-
-struct pattern_s
-	{
-	uint_t size;
-	uint_t base;
-	uint_t count;
-	};
-
-typedef struct pattern_s pattern_t;
-
-#define LENGTH_MAX 2
-#define PATTERN_MAX 65536  // 64K
-
-static pattern_t patterns [PATTERN_MAX];
-static uint_t pcount;
+static uint_t base_count;
+static uint_t sym_count;
 
 
 // Symbols functions
 
-static int symbol_comp (const void * v1, const void * v2)
+static int sym_comp (const void * v1, const void * v2)
 	{
 	symbol_t * s1 = (symbol_t * ) v1;
 	symbol_t * s2 = (symbol_t * ) v2;
@@ -67,55 +58,69 @@ static int symbol_comp (const void * v1, const void * v2)
 	}
 
 
-// Scan frame for all symbols
-
-static void scan_symbol ()
+static symbol_t * sym_add (uint_t base, uint_t size)
 	{
-	// Reset symbols
+	if (sym_count >= SYMBOL_MAX)
+		error (1, 0, "too many symbols");
 
-	memset (symbols, 0, sizeof symbols);
+	symbol_t * s = &(symbols [sym_count++]);
 
+	s->size = size;
+	s->base = base;
+	s->count = 1;
+
+	return s;
+	}
+
+
+// Scan frame for all base symbols
+
+static void scan_base ()
+	{
 	// Count symbol occurrences
 
-	for (uint_t pos = 0; pos < flen; pos++)
+	for (uint_t pos = 0; pos < frame_len; pos++)
 		{
 		symbol_t * s = &(symbols [(uint_t) frame_text [pos]]);
 
-		if (!s->count) s->base = pos;
+		if (!s->count)
+			{
+			s->base = pos;
+			s->size = 1;
+			}
+
 		s->count++;
 		}
 
 	// Sort symbols by count
 
-	qsort (symbols, SYMBOL_MAX, sizeof (symbol_t), symbol_comp);
+	qsort (symbols, BASE_MAX, sizeof (symbol_t), sym_comp);
 
 	// Display symbol statistics
 
-	uint_t scount = 0;
-
-	for (uint_t i = 0; i < SYMBOL_MAX; i++)
+	for (uint_t i = 0; i < BASE_MAX; i++)
 		{
 		symbol_t * s = &(symbols [i]);
 
 		if (!s->count) break;
 
-		printf ("symbol: base=%5u code=%3hhu count=%5u\n",
+		printf ("symbol: base=%5x code=%2x count=%5u\n",
 			s->base, frame_text [s->base], s->count);
 
-		scount++;
+		base_count++;
 		}
 
-	printf ("\nsymbol count=%u\n", scount);
+	printf ("\nsymbol count=%u\n", base_count);
 
 	// Compute entropy
 
 	double entropy = 0.0;
 
-	for (uint_t i = 0; i < scount; i++)
+	for (uint_t i = 0; i < base_count; i++)
 		{
 		symbol_t * s = &(symbols [i]);
 
-		double p = (double) s->count / flen;
+		double p = (double) s->count / frame_len;
 		entropy += -p * log2 (p);
 		}
 
@@ -123,121 +128,55 @@ static void scan_symbol ()
 	}
 
 
-// Pattern function
+// Scan frame for all pairs
 
-static int pattern_compare (const void * v1, const void * v2)
+static void scan_pair ()
 	{
-	pattern_t * p1 = (pattern_t * ) v1;
-	pattern_t * p2 = (pattern_t * ) v2;
-
-	uint_t c1 = p1->count;
-	uint_t c2 = p2->count;
-
-	return (c1 < c2) ? 1 : ((c1 > c2) ? -1 : 0);
-	}
-
-
-static pattern_t * pattern_add (uint_t size, uint_t base)
-	{
-	if (pcount >= PATTERN_MAX)
-		error (1, 0, "too many patterns");
-
-	pattern_t * p = &(patterns [pcount++]);
-
-	p->size = size;
-	p->base = base;
-	p->count = 1;
-
-	//printf ("pattern count=%u\n", pcount);
-
-	return p;
-	}
-
-
-// Scan frame for one pattern size
-
-static void level_scan (uint_t psize)
-	{
-	uint_t rend = flen - psize;
-	uint_t lend = rend - psize;
-
-	uint_t base;
-	uint_t off;
-
-	// Reset the level mask
+	// Reset the frame mask
 	// used to optimize the scan
 
 	memset (frame_mask, 0, sizeof frame_mask);
 
-	for (base = 0; base <= lend; base++)
+	for (uint_t base = 0; base <= frame_len - 3; base++)
 		{
-		// Skip already found pattern
-
-		if (!frame_mask [base])
+		if (!frame_mask [base])  // skip already found pair
 			{
-			frame_mask [base] = 1;
+			// Add new pair
 
-			pattern_t * p = NULL;
+			symbol_t * p = sym_add (base, 2);
+			frame_mask [base] = 1;  // pair now found there
 
-			uint_t lbeg = base + psize;
-
-			for (off = lbeg; off <= rend; off++)
+			for (uint_t off = base + 1; off <= frame_len - 2; off++)
 				{
-				if (!frame_mask [off] && !memcmp (frame_text + base, frame_text + off, psize))
+				if (!frame_mask [off] &&  // skip already found pair
+					(frame_text [base] == frame_text [off]) &&
+					(frame_text [base+1] == frame_text [off + 1]))
 					{
-					//printf ("match: base=%u off=%u\n", base, off);
-
-					if (!p) p = pattern_add (psize, base);
+					frame_mask [off] = 1;  // pair now found there
 					p->count++;
-
-					frame_mask [off] = 1;  // pattern already found there
-					//off += psize - 1;  // skip end of found pattern
 					}
 				}
 			}
 		}
-	}
 
+	// Sort pairs by count
 
-// Scan frame for all patterns
+	qsort (symbols + BASE_MAX, sym_count - BASE_MAX, sizeof (symbol_t), sym_comp);
 
-static void scan_pattern ()
-	{
-	uint_t pmax = flen >> 1;
-	pmax = (pmax > LENGTH_MAX) ? LENGTH_MAX : pmax;
+	// Display pair statistics
 
-	// Reset found patterns
-
-	memset (patterns, 0, sizeof patterns);
-	pcount = 0;
-
-	// Scan for patterns
-
-	for (uint_t psize = 2; psize <= pmax; psize++)
+	for (uint_t i = BASE_MAX; i < sym_count; i++)
 		{
-		//printf ("pattern size=%u\n", psize);
-		level_scan (psize);
-		//putchar ('\n');
-		}
+		symbol_t * p = &(symbols [i]);
 
-	// Sort patterns by count
-
-	qsort (patterns, pcount, sizeof (pattern_t), pattern_compare);
-
-	// Display pattern statistics
-
-	for (uint_t i = 0; i < pcount; i++)
-		{
-		pattern_t * p = &(patterns [i]);
-
-		printf ("pattern: base=%5u code1=%3hhu code2=%3hhu count=%5u \n",
+		printf ("pattern: base=%5x left=%2x right=%2x count=%5u \n",
 			p->base, frame_text [p->base], frame_text [p->base + 1], p->count);
 
 		}
 
 	putchar ('\n');
 
-	printf ("pattern count=%u\n", pcount);
+	printf ("pattern count=%5u\n", sym_count - BASE_MAX);
 	}
 
 
@@ -260,17 +199,25 @@ int main (int argc, char * argv [])
 			int c = fgetc (f);
 			if (c < 0 || c > 255) break;
 
-			if (flen >= FRAME_MAX)
+			if (frame_len >= FRAME_MAX)
 				error (1, 0, "frame too long");
 
-			frame_text [flen++] = c;
+			frame_text [frame_len++] = c;
 			}
 
-		printf ("frame length=%u\n\n", flen);
+		printf ("frame length=%u\n\n", frame_len);
 
-		scan_symbol ();
+		memset (symbols, 0, sizeof symbols);
+		base_count = 0;
+		sym_count = 0;
 
-		scan_pattern ();
+		scan_base ();
+		sym_count = BASE_MAX;
+
+		if (frame_len < 3)
+			error (1, 0, "frame too short");
+
+		scan_pair ();
 
 		break;
 		}
@@ -278,7 +225,7 @@ int main (int argc, char * argv [])
 	f ? fclose (f) : 0;
 
 	clock_t clock_end = clock ();
-	printf ("elapsed=%lu usec\n", (clock_end - clock_begin));
+	printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
 
 	return 0;
 	}
