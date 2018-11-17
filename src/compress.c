@@ -19,7 +19,6 @@ typedef unsigned int uint_t;
 #define FRAME_MAX 65536  // 64K
 
 static uchar_t frame_text [FRAME_MAX];
-static uchar_t frame_mask [FRAME_MAX];
 static uint_t frame_len;
 
 
@@ -30,18 +29,26 @@ struct symbol_s
 	uint_t base;
 	uint_t size;
 	uint_t count;
-	uint_t left;
-	uint_t right;
+
+	struct symbol_s * left;
+	struct symbol_s * right;
 	};
 
 typedef struct symbol_s symbol_t;
 
 #define BASE_MAX 256
 #define SYMBOL_MAX 65536  // 64K
+#define PATTERN_MAX (SYMBOL_MAX - BASE_MAX)
 
 static symbol_t symbols [SYMBOL_MAX];
-static uint_t base_count;
 static uint_t sym_count;
+
+static symbol_t * frame_sym [FRAME_MAX];
+static uchar_t frame_mask [FRAME_MAX];
+static uint_t frame_size;
+
+static symbol_t pairs [PATTERN_MAX];
+static uint_t pair_count;
 
 
 // Symbols functions
@@ -77,6 +84,8 @@ static symbol_t * sym_add (uint_t base, uint_t size)
 
 static void scan_base ()
 	{
+	frame_size = frame_len;
+
 	// Count symbol occurrences
 
 	for (uint_t pos = 0; pos < frame_len; pos++)
@@ -89,6 +98,7 @@ static void scan_base ()
 			s->size = 1;
 			}
 
+		frame_sym [pos] = s;
 		s->count++;
 		}
 
@@ -107,16 +117,16 @@ static void scan_base ()
 		printf ("symbol: base=%5x code=%2x count=%5u\n",
 			s->base, frame_text [s->base], s->count);
 
-		base_count++;
+		sym_count++;
 		}
 
-	printf ("\nsymbol count=%u\n", base_count);
+	printf ("\nsymbol count=%u\n", sym_count);
 
 	// Compute entropy
 
 	double entropy = 0.0;
 
-	for (uint_t i = 0; i < base_count; i++)
+	for (uint_t i = 0; i < sym_count; i++)
 		{
 		symbol_t * s = &(symbols [i]);
 
@@ -128,31 +138,55 @@ static void scan_base ()
 	}
 
 
+static symbol_t * pair_add (uint_t base, uint_t size)
+	{
+	if (pair_count >= PATTERN_MAX)
+		error (1, 0, "too many patterns");
+
+	symbol_t * s = &(pairs [pair_count++]);
+
+	s->base = base;
+	s->size = size;
+	s->count = 1;
+
+	return s;
+	}
+
+
 // Scan frame for all pairs
 
 static void scan_pair ()
 	{
-	// Reset the frame mask
-	// used to optimize the scan
+	// Frame mask is used to optimize the scan
 
-	memset (frame_mask, 0, sizeof frame_mask);
+	memset (frame_mask , 0, sizeof frame_mask);
 
-	for (uint_t base = 0; base <= frame_len - 3; base++)
+	memset (pairs , 0, sizeof pairs);
+	pair_count = 0;
+
+	for (uint_t left = 0; left <= frame_size - 3; left++)
 		{
-		if (!frame_mask [base])  // skip already found pair
+		if (!frame_mask [left])  // skip already found pair
 			{
+			frame_mask [left] = 1;  // pair now found there
+
 			// Add new pair
 
-			symbol_t * p = sym_add (base, 2);
-			frame_mask [base] = 1;  // pair now found there
+			symbol_t * p = pair_add (left, 2);
 
-			for (uint_t off = base + 1; off <= frame_len - 2; off++)
+			p->left = frame_sym [left];
+			p->right = frame_sym [left + 1];
+
+			// Scan for pair duplicates
+
+			for (uint_t right = left + 1; right <= frame_size - 2; right++)
 				{
-				if (!frame_mask [off] &&  // skip already found pair
-					(frame_text [base] == frame_text [off]) &&
-					(frame_text [base+1] == frame_text [off + 1]))
+				if (!frame_mask [right] &&  // skip already found pair
+					(frame_sym [left] == frame_sym [right]) &&
+					(frame_sym [left+1] == frame_sym [right + 1]))
 					{
-					frame_mask [off] = 1;  // pair now found there
+					frame_mask [right] = 1;  // pair now found there
+
 					p->count++;
 					}
 				}
@@ -161,22 +195,7 @@ static void scan_pair ()
 
 	// Sort pairs by count
 
-	qsort (symbols + BASE_MAX, sym_count - BASE_MAX, sizeof (symbol_t), sym_comp);
-
-	// Display pair statistics
-
-	for (uint_t i = BASE_MAX; i < sym_count; i++)
-		{
-		symbol_t * p = &(symbols [i]);
-
-		printf ("pattern: base=%5x left=%2x right=%2x count=%5u \n",
-			p->base, frame_text [p->base], frame_text [p->base + 1], p->count);
-
-		}
-
-	putchar ('\n');
-
-	printf ("pattern count=%5u\n", sym_count - BASE_MAX);
+	qsort (pairs, pair_count, sizeof (symbol_t), sym_comp);
 	}
 
 
@@ -208,7 +227,6 @@ int main (int argc, char * argv [])
 		printf ("frame length=%u\n\n", frame_len);
 
 		memset (symbols, 0, sizeof symbols);
-		base_count = 0;
 		sym_count = 0;
 
 		scan_base ();
@@ -219,6 +237,18 @@ int main (int argc, char * argv [])
 
 		scan_pair ();
 
+		// Display pair statistics
+
+		for (uint_t i = 0; i < pair_count; i++)
+			{
+			symbol_t * p = &(pairs [i]);
+
+			printf ("pattern: base=%5x left=%2x right=%2x count=%5u \n",
+				p->base, frame_text [p->base], frame_text [p->base + 1], p->count);
+
+			}
+
+		printf ("\npattern count=%5u\n", pair_count);
 		break;
 		}
 
