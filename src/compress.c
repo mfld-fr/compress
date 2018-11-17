@@ -7,7 +7,6 @@
 #include <memory.h>
 #include <time.h>
 #include <error.h>
-#include <math.h>
 
 
 typedef unsigned char uchar_t;
@@ -44,24 +43,33 @@ static symbol_t symbols [SYMBOL_MAX];
 static uint_t sym_count;
 
 static symbol_t * frame_sym [FRAME_MAX];
-static uchar_t frame_mask [FRAME_MAX];
 static uint_t frame_size;
 
+static symbol_t * frame_pair [FRAME_MAX];
 static symbol_t pairs [PATTERN_MAX];
 static uint_t pair_count;
 
 
-// Symbols functions
-
-static int sym_comp (const void * v1, const void * v2)
+struct key_sym_s
 	{
-	symbol_t * s1 = (symbol_t * ) v1;
-	symbol_t * s2 = (symbol_t * ) v2;
+	uint_t index;
+	symbol_t * sym;
+	};
 
-	uint_t c1 = s1->count;
-	uint_t c2 = s2->count;
+typedef struct key_sym_s key_sym_t;
 
-	return (c1 < c2) ? 1 : ((c1 > c2) ? -1 : 0);
+static key_sym_t keys [SYMBOL_MAX];
+
+
+static int key_comp (const void * v1, const void * v2)
+	{
+	key_sym_t * k1 = (key_sym_t * ) v1;
+	key_sym_t * k2 = (key_sym_t * ) v2;
+
+	uint_t i1 = k1->index;
+	uint_t i2 = k2->index;
+
+	return (i1 < i2) ? 1 : ((i1 > i2) ? -1 : 0);
 	}
 
 
@@ -70,11 +78,12 @@ static symbol_t * sym_add (uint_t base, uint_t size)
 	if (sym_count >= SYMBOL_MAX)
 		error (1, 0, "too many symbols");
 
-	symbol_t * s = &(symbols [sym_count++]);
+	symbol_t * s = symbols + sym_count++;
+
+	memset (s, 0, sizeof (symbol_t));  // erase if previously used
 
 	s->size = size;
 	s->base = base;
-	s->count = 1;
 
 	return s;
 	}
@@ -84,13 +93,11 @@ static symbol_t * sym_add (uint_t base, uint_t size)
 
 static void scan_base ()
 	{
-	frame_size = frame_len;
-
 	// Count symbol occurrences
 
 	for (uint_t pos = 0; pos < frame_len; pos++)
 		{
-		symbol_t * s = &(symbols [(uint_t) frame_text [pos]]);
+		symbol_t * s = symbols + (uint_t) frame_text [pos];
 
 		if (!s->count)
 			{
@@ -102,39 +109,32 @@ static void scan_base ()
 		s->count++;
 		}
 
-	// Sort symbols by count
+	frame_size = frame_len;
 
-	qsort (symbols, BASE_MAX, sizeof (symbol_t), sym_comp);
-
-	// Display symbol statistics
+	// Build index and sort
 
 	for (uint_t i = 0; i < BASE_MAX; i++)
 		{
-		symbol_t * s = &(symbols [i]);
+		key_sym_t * key = keys + i;
+		symbol_t * s = symbols + i;
+
+		key->index = s->count;
+		key->sym = s;
+		}
+
+	qsort (keys, BASE_MAX, sizeof (key_sym_t), key_comp);
+
+	// Truncate the symbol table
+
+	for (uint_t i = 0; i < BASE_MAX; i++)
+		{
+		key_sym_t * k = keys + i;
+		symbol_t * s = k->sym;
 
 		if (!s->count) break;
 
-		printf ("symbol: base=%5x code=%2x count=%5u\n",
-			s->base, frame_text [s->base], s->count);
-
 		sym_count++;
 		}
-
-	printf ("\nsymbol count=%u\n", sym_count);
-
-	// Compute entropy
-
-	double entropy = 0.0;
-
-	for (uint_t i = 0; i < sym_count; i++)
-		{
-		symbol_t * s = &(symbols [i]);
-
-		double p = (double) s->count / frame_len;
-		entropy += -p * log2 (p);
-		}
-
-	printf ("entropy=%f\n\n", entropy);
 	}
 
 
@@ -143,7 +143,7 @@ static symbol_t * pair_add (uint_t base, uint_t size)
 	if (pair_count >= PATTERN_MAX)
 		error (1, 0, "too many patterns");
 
-	symbol_t * s = &(pairs [pair_count++]);
+	symbol_t * s = pairs +  pair_count++;
 
 	s->base = base;
 	s->size = size;
@@ -159,17 +159,15 @@ static void scan_pair ()
 	{
 	// Frame mask is used to optimize the scan
 
-	memset (frame_mask , 0, sizeof frame_mask);
+	memset (frame_pair , 0, sizeof frame_pair);
 
 	memset (pairs , 0, sizeof pairs);
 	pair_count = 0;
 
 	for (uint_t left = 0; left <= frame_size - 3; left++)
 		{
-		if (!frame_mask [left])  // skip already found pair
+		if (!frame_pair [left])  // skip already found pair
 			{
-			frame_mask [left] = 1;  // pair now found there
-
 			// Add new pair
 
 			symbol_t * p = pair_add (left, 2);
@@ -177,25 +175,133 @@ static void scan_pair ()
 			p->left = frame_sym [left];
 			p->right = frame_sym [left + 1];
 
+			frame_pair [left] = p;  // pair now found there
+
 			// Scan for pair duplicates
 
 			for (uint_t right = left + 1; right <= frame_size - 2; right++)
 				{
-				if (!frame_mask [right] &&  // skip already found pair
+				if (!frame_pair [right] &&  // skip already found pair
 					(frame_sym [left] == frame_sym [right]) &&
 					(frame_sym [left+1] == frame_sym [right + 1]))
 					{
-					frame_mask [right] = 1;  // pair now found there
+					frame_pair [right] = p;  // pair now found there
 
 					p->count++;
 					}
 				}
+
+			// Do not count the symmetric pairs
+
+			if (p->left == p->right) p->count = 0;
 			}
 		}
 
-	// Sort pairs by count
+	// Build index and sort
 
-	qsort (pairs, pair_count, sizeof (symbol_t), sym_comp);
+	for (uint_t i = 0; i < pair_count; i++)
+		{
+		key_sym_t * key = keys + i;
+		symbol_t * p = pairs + i;
+
+		key->index = p->count;
+		key->sym = p;
+		}
+
+	// Sort pairs by occurrences
+
+	qsort (keys, pair_count, sizeof (key_sym_t), key_comp);
+	}
+
+
+// Shrink the most redundant pairs
+
+static int shrink_pair ()
+	{
+	int shrink = 0;  // no shrink
+
+	for (uint_t i = 0; i < pair_count; i++)
+		{
+		key_sym_t * k = keys + i;
+		symbol_t * p = k->sym;
+
+		// Skip the symmetric pairs
+
+		if (p->left == p->right) continue;
+
+		// Skip any singleton or invalid pairs
+
+		if (p->count < 2) continue;
+
+		// Check all pair occurrences
+
+		symbol_t * s = NULL;
+
+		for (uint_t pos = p->base; pos < frame_size - 1; pos++)
+			{
+			if (frame_pair [pos] != p) continue;
+
+			symbol_t * p_left = NULL;
+			uint_t c_left = 0;
+
+			if (pos > 0)
+				{
+				p_left = frame_pair [pos - 1];
+				c_left = p_left->count;
+				}
+
+			symbol_t * p_right = NULL;
+			uint_t c_right = 0;
+			if (pos < frame_size - 2)
+				{
+				p_right = frame_pair [pos + 1];
+				c_right = p_right->count;
+				}
+
+			// Can shrink if stronger than neighbors
+
+			if ((c_left <= p->count) && (p->count >= c_right))
+				{
+				// Update child counts
+
+				p->left->count--;
+				p->right->count--;
+
+				// Create a new symbol from the pair
+
+				if (!s)
+					{
+					s = sym_add (pos, 2);
+
+					s->left = p->left;
+					s->right = p->right;
+					}
+
+				s->count++;
+
+				// Invalidate neighbors
+
+				if (p_left) p_left->count = 0;
+				if (p_right) p_right->count = 0;
+
+				// Replace current pair by the new symbol
+
+				frame_sym [pos] = s;
+
+				// Shift the frame left
+
+				uint_t shift = (frame_size - pos - 2) * sizeof (symbol_t *);
+				memcpy (frame_sym + pos + 1, frame_sym + pos + 2, shift);
+				memcpy (frame_pair + pos + 1, frame_pair + pos + 2, shift);
+
+				frame_size--;
+
+				shrink = 1;
+				}
+			}
+		}
+
+	return shrink;
 	}
 
 
@@ -224,31 +330,31 @@ int main (int argc, char * argv [])
 			frame_text [frame_len++] = c;
 			}
 
-		printf ("frame length=%u\n\n", frame_len);
+		printf ("initial:\n  length=%u\n", frame_len);
 
-		memset (symbols, 0, sizeof symbols);
+		memset (symbols, 0, sizeof (symbols));
 		sym_count = 0;
 
 		scan_base ();
-		sym_count = BASE_MAX;
+		printf ("  symbols=%u\n\n", sym_count);
 
 		if (frame_len < 3)
 			error (1, 0, "frame too short");
 
-		scan_pair ();
+		// Iterate of pair scan and shrink
 
-		// Display pair statistics
-
-		for (uint_t i = 0; i < pair_count; i++)
+		while (1)
 			{
-			symbol_t * p = &(pairs [i]);
-
-			printf ("pattern: base=%5x left=%2x right=%2x count=%5u \n",
-				p->base, frame_text [p->base], frame_text [p->base + 1], p->count);
-
+			scan_pair ();
+			if (!shrink_pair ()) break;
 			}
 
-		printf ("\npattern count=%5u\n", pair_count);
+		printf ("final:\n  length=%u\n", frame_size);
+		printf ("  symbols=%u\n\n", sym_count);
+
+		double ratio = (double) frame_size / frame_len;
+		printf ("ratio=%f\n", ratio);
+
 		break;
 		}
 
