@@ -86,17 +86,27 @@ static pair_t pairs [PAIR_MAX];
 static uint_t pair_count;
 
 
-// TODO: merge index and dynamic table
+// Indexes for quick sort
 
-struct key_sym_s
+struct index_sym_s
 	{
-	uint_t index;
+	uint_t key;
 	symbol_t * sym;
 	};
 
-typedef struct key_sym_s key_sym_t;
+typedef struct index_sym_s index_sym_t;
 
-static key_sym_t keys [SYMBOL_MAX];
+static index_sym_t index_sym [SYMBOL_MAX];
+
+struct index_pair_s
+	{
+	uint_t key;
+	pair_t * pair;
+	};
+
+typedef struct index_pair_s index_pair_t;
+
+static index_pair_t index_pair [PAIR_MAX];
 
 
 // Program options
@@ -104,15 +114,26 @@ static key_sym_t keys [SYMBOL_MAX];
 uchar_t opt_sym_list;
 
 
-static int key_comp (const void * v1, const void * v2)
+static int sym_comp (const void * v1, const void * v2)
 	{
-	key_sym_t * k1 = (key_sym_t * ) v1;
-	key_sym_t * k2 = (key_sym_t * ) v2;
+	index_sym_t * i1 = (index_sym_t * ) v1;
+	index_sym_t * i2 = (index_sym_t * ) v2;
 
-	uint_t i1 = k1->index;
-	uint_t i2 = k2->index;
+	uint_t k1 = i1->key;
+	uint_t k2 = i2->key;
 
-	return (i1 < i2) ? 1 : ((i1 > i2) ? -1 : 0);
+	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
+	}
+
+static int pair_comp (const void * v1, const void * v2)
+	{
+	index_pair_t * i1 = (index_pair_t * ) v1;
+	index_pair_t * i2 = (index_pair_t * ) v2;
+
+	uint_t k1 = i1->key;
+	uint_t k2 = i2->key;
+
+	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
 	}
 
 
@@ -138,14 +159,14 @@ static void sym_list ()
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
-		key_sym_t * key = keys + i;
+		index_sym_t * index = index_sym + i;
 		symbol_t * s = symbols + i;
 
-		key->index = s->count;
-		key->sym = s;
+		index->key = s->count;
+		index->sym = s;
 		}
 
-	qsort (keys, sym_count, sizeof (key_sym_t), key_comp);
+	qsort (index_sym, sym_count, sizeof (index_sym_t), sym_comp);
 
 	// List the used symbols
 
@@ -154,7 +175,7 @@ static void sym_list ()
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
-		key_sym_t * k = keys + i;
+		index_sym_t * k = index_sym + i;
 		symbol_t * s = k->sym;
 
 		if (!s->count) break;
@@ -288,21 +309,21 @@ static int shrink_pair ()
 
 	for (uint_t i = 0; i < pair_count; i++)
 		{
-		key_sym_t * key = keys + i;
+		index_pair_t * index = index_pair + i;
 		pair_t * pair = pairs + i;
 
-		key->index = pair->count;
-		key->sym = pair;
+		index->key = pair->count;
+		index->pair = pair;
 		}
 
-	qsort (keys, pair_count, sizeof (key_sym_t), key_comp);
+	qsort (index_pair, pair_count, sizeof (index_pair_t), pair_comp);
 
 	// Try to shrink all repeated pairs
 
 	for (uint_t i = 0; i < pair_count; i++)
 		{
-		key_sym_t * k = keys + i;
-		pair_t * pair = k->sym;
+		index_pair_t * k = index_pair + i;
+		pair_t * pair = k->pair;
 
 		// Skip the symmetric pairs
 
