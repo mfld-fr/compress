@@ -9,26 +9,31 @@
 #include <error.h>
 #include <math.h>
 
+#include "list.h"
 
 typedef unsigned char uchar_t;
 typedef unsigned int uint_t;
 
 
-// Frame to scan
+// Frame of codes
 
+#define CODE_MAX 256  // 8 bits
 #define FRAME_MAX 65536  // 64K
 
 static uchar_t frame_text [FRAME_MAX];
 static uint_t frame_len;
 
+static uchar_t frame_out [FRAME_MAX];
+static uint_t size_out;
 
 // Symbol definitions
 
 struct symbol_s
 	{
-	uint_t base;
 	uint_t size;
 	uint_t count;
+
+	uint_t base;
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -36,20 +41,43 @@ struct symbol_s
 
 typedef struct symbol_s symbol_t;
 
-#define BASE_MAX 256
 #define SYMBOL_MAX 65536  // 64K
-#define PATTERN_MAX (SYMBOL_MAX - BASE_MAX)
 
 // TODO: move symbols from static to dynamic
 
 static symbol_t symbols [SYMBOL_MAX];
 static uint_t sym_count;
 
-static symbol_t * frame_sym [FRAME_MAX];
-static uint_t frame_size;
+struct pair_s;
 
-static symbol_t * frame_pair [FRAME_MAX];
-static symbol_t pairs [PATTERN_MAX];
+struct position_s
+	{
+	list_node_t node;
+
+	symbol_t * sym;
+	struct pair_s * pair;
+	};
+
+typedef struct position_s position_t;
+
+static list_node_t pos_root;
+static uint_t pos_size;
+
+#define PAIR_MAX (SYMBOL_MAX - CODE_MAX)
+
+struct pair_s
+	{
+	uint_t count;
+
+	position_t * base;
+
+	struct symbol_s * left;
+	struct symbol_s * right;
+	};
+
+typedef struct pair_s pair_t;
+
+static pair_t pairs [PAIR_MAX];
 static uint_t pair_count;
 
 
@@ -123,7 +151,7 @@ static void sym_list ()
 
 		count++;
 
-		double p = (double) s->count / frame_size;
+		double p = (double) s->count / pos_size;
 		entropy += -p * log2 (p);
 
 		printf ("symbol [%u]: ", i);
@@ -145,39 +173,44 @@ static void sym_list ()
 
 static void scan_base ()
 	{
+	memset (symbols, 0, sizeof symbols);
+	list_init (&pos_root);
+
 	// Count symbol occurrences
 
-	for (uint_t pos = 0; pos < frame_len; pos++)
+	for (uint_t i = 0; i < frame_len; i++)
 		{
-		symbol_t * s = symbols + (uint_t) frame_text [pos];
+		symbol_t * sym = symbols + (uint_t) frame_text [i];
 
-		if (!s->count)
+		if (!sym->count)
 			{
-			s->base = pos;
-			s->size = 1;
+			sym->base = i;
+			sym->size = 1;
 			}
 
-		frame_sym [pos] = s;
-		s->count++;
+		position_t * pos = malloc (sizeof (position_t));
+		list_add_tail (&pos_root, &(pos->node));
+		pos->sym = sym;
+
+		sym->count++;
 		}
 
-	sym_count = BASE_MAX;
-	frame_size = frame_len;
+	sym_count = CODE_MAX;
+	pos_size = frame_len;
 	}
 
 
-static symbol_t * pair_add (uint_t base, uint_t size)
+static pair_t * pair_add (position_t * base)
 	{
-	if (pair_count >= PATTERN_MAX)
-		error (1, 0, "too many patterns");
+	if (pair_count >= PAIR_MAX)
+		error (1, 0, "too many pairs");
 
-	symbol_t * s = pairs +  pair_count++;
+	pair_t * pair = pairs +  pair_count++;
 
-	s->base = base;
-	s->size = size;
-	s->count = 1;
+	pair->base = base;
+	pair->count = 1;
 
-	return s;
+	return pair;
 	}
 
 
@@ -185,45 +218,53 @@ static symbol_t * pair_add (uint_t base, uint_t size)
 
 static void scan_pair ()
 	{
-	// Frame mask is used to optimize the scan
-
-	memset (frame_pair , 0, sizeof frame_pair);
+	list_node_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		pos->pair = NULL;
+		node = node->next;
+		}
 
 	memset (pairs , 0, sizeof pairs);
 	pair_count = 0;
 
-	for (uint_t left = 0; left <= frame_size - 3; left++)
+	list_node_t * node_left = pos_root.next;
+	while (node_left != pos_root.prev->prev)
 		{
-		if (!frame_pair [left])  // skip already found pair
+		position_t * pos_left = (position_t *) node_left;  // node as first member
+		if (!pos_left->pair)  // skip already found pair
 			{
 			// Add new pair
 
-			symbol_t * p = pair_add (left, 2);
+			pair_t * pair = pair_add (pos_left);
 
-			p->left = frame_sym [left];
-			p->right = frame_sym [left + 1];
+			pair->left = pos_left->sym;
+			pair->right = ((position_t *) (pos_left->node.next))->sym;
 
-			frame_pair [left] = p;  // pair now found there
+			pos_left->pair = pair;  // pair now found there
 
 			// Scan for pair duplicates
 
-			for (uint_t right = left + 1; right <= frame_size - 2; right++)
+			list_node_t * node_right = node_left->next;
+			while (node_right != pos_root.prev)
 				{
-				if (!frame_pair [right] &&  // skip already found pair
-					(frame_sym [left] == frame_sym [right]) &&
-					(frame_sym [left+1] == frame_sym [right + 1]))
+				position_t * pos_right = (position_t *) node_right;  // node as first member
+
+				if (!pos_right->pair &&  // skip already found pair
+					(pair->left == pos_right->sym) &&
+					(pair->right == ((position_t *) (pos_right->node.next))->sym))
 					{
-					frame_pair [right] = p;  // pair now found there
+					pos_right->pair = pair;  // pair now found there
 
-					p->count++;
+					pair->count++;
 					}
+
+				node_right = node_right->next;
 				}
-
-			// Do not count the symmetric pairs
-			// TODO: ugly way to do - better to reject symmetric pairs
-
-			if (p->left == p->right) p->count = 0;
 			}
+
+		node_left = node_left->next;
 		}
 	}
 
@@ -233,14 +274,15 @@ static int shrink_pair ()
 	int shrink = 0;  // no shrink
 
 	// Build pair index and sort by occurrences
+	// TODO: is this really necessary - not the maximum ?
 
 	for (uint_t i = 0; i < pair_count; i++)
 		{
 		key_sym_t * key = keys + i;
-		symbol_t * p = pairs + i;
+		pair_t * pair = pairs + i;
 
-		key->index = p->count;
-		key->sym = p;
+		key->index = pair->count;
+		key->sym = pair;
 		}
 
 	qsort (keys, pair_count, sizeof (key_sym_t), key_comp);
@@ -250,81 +292,98 @@ static int shrink_pair ()
 	for (uint_t i = 0; i < pair_count; i++)
 		{
 		key_sym_t * k = keys + i;
-		symbol_t * p = k->sym;
+		pair_t * pair = k->sym;
 
 		// Skip the symmetric pairs
 
-		if (p->left == p->right) continue;
+		if (pair->left == pair->right) continue;
 
 		// Skip any singleton or invalid pairs
 
-		if (p->count < 2) continue;
+		if (pair->count < 2) continue;
 
 		// Check all pair occurrences
 
-		symbol_t * s = NULL;
+		symbol_t * sym = NULL;
 
-		for (uint_t pos = p->base; pos < frame_size - 1; pos++)
+		list_node_t * node = (list_node_t *) pair->base;  // node as first member
+		while ((node != pos_root.prev) && (node != &pos_root))  // also check shifted limit
 			{
-			if (frame_pair [pos] != p) continue;
-
-			symbol_t * p_left = NULL;
-			uint_t c_left = 0;
-
-			if (pos > 0)
+			position_t * pos = (position_t *) node;  // node as first member
+			if (pos->pair == pair)
 				{
-				p_left = frame_pair [pos - 1];
-				c_left = p_left->count;
-				}
+				// Consider left neighbor pair
 
-			symbol_t * p_right = NULL;
-			uint_t c_right = 0;
-			if (pos < frame_size - 2)
-				{
-				p_right = frame_pair [pos + 1];
-				c_right = p_right->count;
-				}
+				pair_t * pair_left = NULL;
+				uint_t count_left = 0;
 
-			// Can shrink if stronger than neighbors
-
-			if ((c_left <= p->count) && (p->count >= c_right))
-				{
-				// Update child counts
-
-				p->left->count--;
-				p->right->count--;
-
-				// Create a new symbol from the pair
-
-				if (!s)
+				if (node != pos_root.next)
 					{
-					s = sym_add (pos, 2);
+					pair_left = ((position_t *) (node->prev))->pair;
 
-					s->left = p->left;
-					s->right = p->right;
+					// Filter symmetric pairs
+
+					if (pair_left && (pair_left->left != pair_left->right))
+						count_left = pair_left->count;
+
 					}
 
-				s->count++;
+				// Consider right neighbor pair
 
-				// Invalidate neighbors
+				pair_t * pair_right = NULL;
+				uint_t count_right = 0;
+				if (node != pos_root.prev->prev)
+					{
+					pair_right = ((position_t *) (node->next))->pair;
 
-				if (p_left) p_left->count = 0;
-				if (p_right) p_right->count = 0;
+					// Filter symmetric pairs
 
-				// Replace current pair by the new symbol
+					if (pair_right && (pair_right->left != pair_right->right))
+						count_right = pair_right->count;
 
-				frame_sym [pos] = s;
+					}
 
-				// Shift the frame left
+				// Can shrink if stronger than neighbors
 
-				uint_t shift = (frame_size - pos - 2) * sizeof (symbol_t *);
-				memcpy (frame_sym + pos + 1, frame_sym + pos + 2, shift);
-				memcpy (frame_pair + pos + 1, frame_pair + pos + 2, shift);
+				if ((count_left <= pair->count) && (pair->count >= count_right))
+					{
+					// Invalidate neighbor pairs
+					// TODO: invalidate or decrement ?
 
-				frame_size--;
+					if (pair_left) pair_left->count = 0;
+					if (pair_right) pair_right->count = 0;
 
-				shrink = 1;
+					// Create a new symbol from the pair
+
+					if (!sym)
+						{
+						sym = sym_add (0, 2);
+
+						sym->left = pair->left;
+						sym->right = pair->right;
+						}
+
+					// Update symbol counts
+
+					sym->left->count--;
+					sym->right->count--;
+
+					sym->count++;
+
+					// Replace current pair by the new symbol
+					// and shift the frame left
+
+					pos->sym = sym;
+					pos->pair = NULL;  // no more pair here
+
+					list_remove (node->next);
+					pos_size--;
+
+					shrink = 1;
+					}
 				}
+
+			node = node->next;
 			}
 		}
 
@@ -332,10 +391,55 @@ static int shrink_pair ()
 	}
 
 
+static void compress ()
+	{
+	// Base symbol scan
+
+	scan_base ();
+	//sym_list ();
+
+	// Iterate on pair scan & shrink
+
+	while (1)
+		{
+		scan_pair ();
+		if (!shrink_pair ()) break;
+		}
+	}
+
+
+static void exp_sym (symbol_t * s)
+	{
+	if (s->size == 1)
+		{
+		frame_out [size_out++] = frame_text [s->base];
+		}
+	else
+		{
+		exp_sym (s->left);
+		exp_sym (s->right);
+		}
+	}
+
+
+static void expand ()
+	{
+	size_out = 0;
+
+	list_node_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+		exp_sym (sym);
+
+		node = node->next;
+		}
+	}
+
+
 int main (int argc, char * argv [])
 	{
-	clock_t clock_begin = clock ();
-
 	FILE * f = NULL;
 
 	while (1)
@@ -360,37 +464,38 @@ int main (int argc, char * argv [])
 		puts ("INITIAL:\n");
 		printf ("frame length=%u\n\n", frame_len);
 
-		memset (symbols, 0, sizeof (symbols));
-		sym_count = 0;
-
-		scan_base ();
-		sym_list ();
-
 		if (frame_len < 3)
 			error (1, 0, "frame too short");
 
-		// Iterate of pair scan and shrink
+		clock_t clock_begin = clock ();
+		compress ();
+		clock_t clock_end = clock ();
 
-		while (1)
-			{
-			scan_pair ();
-			if (!shrink_pair ()) break;
-			}
+		puts ("COMPRESS:\n");
+		printf ("frame length=%u\n", pos_size);
+		//sym_list ();
 
-		puts ("FINAL:\n");
-		printf ("frame length=%u\n\n", frame_size);
-		sym_list ();
-
-		double ratio = (double) frame_size / frame_len;
+		double ratio = (double) pos_size / frame_len;
 		printf ("ratio=%f\n", ratio);
+		printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
 
+		puts ("EXPAND:\n");
+
+		clock_begin = clock ();
+		expand ();
+		clock_end = clock ();
+
+		if (size_out != frame_len)
+			error (1, 0, "length mismatch");
+
+		if (memcmp (frame_text, frame_out, size_out))
+			error (1, 0, "frame mismatch");
+
+		printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
 		break;
 		}
 
-	f ? fclose (f) : 0;
-
-	clock_t clock_end = clock ();
-	printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
+	if (f) fclose (f);
 
 	return 0;
 	}
