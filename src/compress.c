@@ -8,6 +8,7 @@
 #include <time.h>
 #include <error.h>
 #include <math.h>
+#include <unistd.h>
 
 #include "list.h"
 
@@ -20,8 +21,8 @@ typedef unsigned int uint_t;
 #define CODE_MAX 256  // 8 bits
 #define FRAME_MAX 65536  // 64K
 
-static uchar_t frame_text [FRAME_MAX];
-static uint_t frame_len;
+static uchar_t frame_in [FRAME_MAX];
+static uint_t size_in;
 
 static uchar_t frame_out [FRAME_MAX];
 static uint_t size_out;
@@ -30,10 +31,14 @@ static uint_t size_out;
 
 struct symbol_s
 	{
-	uint_t size;
-	uint_t count;
+	uint_t count;  // number of symbol occurrences
 
-	uint_t base;
+	// For leaf symbol
+
+	uint_t base;   // offset of first occurrence in input frame
+	uint_t size;   // size in input codes
+
+	// For node symbol
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -52,7 +57,7 @@ struct pair_s;
 
 struct position_s
 	{
-	list_node_t node;
+	list_node_t node;  // must be the first element
 
 	symbol_t * sym;
 	struct pair_s * pair;
@@ -69,7 +74,7 @@ struct pair_s
 	{
 	uint_t count;
 
-	position_t * base;
+	position_t * base;  // position of first occurrence
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -92,6 +97,11 @@ struct key_sym_s
 typedef struct key_sym_s key_sym_t;
 
 static key_sym_t keys [SYMBOL_MAX];
+
+
+// Program options
+
+uchar_t opt_sym_list;
 
 
 static int key_comp (const void * v1, const void * v2)
@@ -157,7 +167,7 @@ static void sym_list ()
 		printf ("symbol [%u]: ", i);
 
 		if (s->size == 1)
-			printf ("code=%hu ", frame_text [s->base]);
+			printf ("code=%hu ", frame_in [s->base]);
 			else
 			printf ("size=%u ", s->size);
 
@@ -178,9 +188,9 @@ static void scan_base ()
 
 	// Count symbol occurrences
 
-	for (uint_t i = 0; i < frame_len; i++)
+	for (uint_t i = 0; i < size_in; i++)
 		{
-		symbol_t * sym = symbols + (uint_t) frame_text [i];
+		symbol_t * sym = symbols + (uint_t) frame_in [i];
 
 		if (!sym->count)
 			{
@@ -196,7 +206,7 @@ static void scan_base ()
 		}
 
 	sym_count = CODE_MAX;
-	pos_size = frame_len;
+	pos_size = size_in;
 	}
 
 
@@ -348,7 +358,6 @@ static int shrink_pair ()
 				if ((count_left <= pair->count) && (pair->count >= count_right))
 					{
 					// Invalidate neighbor pairs
-					// TODO: invalidate or decrement ?
 
 					if (pair_left) pair_left->count = 0;
 					if (pair_right) pair_right->count = 0;
@@ -396,7 +405,6 @@ static void compress ()
 	// Base symbol scan
 
 	scan_base ();
-	//sym_list ();
 
 	// Iterate on pair scan & shrink
 
@@ -412,7 +420,7 @@ static void exp_sym (symbol_t * s)
 	{
 	if (s->size == 1)
 		{
-		frame_out [size_out++] = frame_text [s->base];
+		frame_out [size_out++] = frame_in [s->base];
 		}
 	else
 		{
@@ -444,10 +452,30 @@ int main (int argc, char * argv [])
 
 	while (1)
 		{
-		if (argc < 2)
-			error (1, 0, "missing input file as argument");
+		char opt;
 
-		f = fopen (argv [1], "r");
+		while (1)
+			{
+			opt = getopt (argc, argv, "s");
+			if (opt < 0 || opt == '?') break;
+
+			switch (opt)
+				{
+				case 's':  // dump symbols
+					opt_sym_list = 1;
+					break;
+
+				}
+			}
+
+		if (opt == '?' || optind != argc - 1)
+			{
+			printf ("usage: %s [options] [input file]\n\n", argv [0]);
+			puts ("  -s  list input symbols");
+			break;
+			}
+
+		f = fopen (argv [optind], "r");
 		if (!f) break;
 
 		while (1)
@@ -455,43 +483,53 @@ int main (int argc, char * argv [])
 			int c = fgetc (f);
 			if (c < 0 || c > 255) break;
 
-			if (frame_len >= FRAME_MAX)
+			if (size_in >= FRAME_MAX)
 				error (1, 0, "frame too long");
 
-			frame_text [frame_len++] = c;
+			frame_in [size_in++] = c;
 			}
 
-		puts ("INITIAL:\n");
-		printf ("frame length=%u\n\n", frame_len);
+		puts ("INITIAL:");
+		printf ("frame length=%u\n\n", size_in);
 
-		if (frame_len < 3)
-			error (1, 0, "frame too short");
+		if (opt_sym_list)
+			{
+			scan_base ();
+			sym_list ();
+			}
+		else
+			{
+			if (size_in < 3)
+				error (1, 0, "frame too short");
 
-		clock_t clock_begin = clock ();
-		compress ();
-		clock_t clock_end = clock ();
+			printf ("Compressing...");
+			clock_t clock_begin = clock ();
+			compress ();
+			clock_t clock_end = clock ();
+			puts (" DONE\n");
 
-		puts ("COMPRESS:\n");
-		printf ("frame length=%u\n", pos_size);
-		//sym_list ();
+			puts ("COMPRESS:");
+			printf ("frame length=%u\n", pos_size);
 
-		double ratio = (double) pos_size / frame_len;
-		printf ("ratio=%f\n", ratio);
-		printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
+			double ratio = (double) pos_size / size_in;
+			printf ("ratio=%f\n", ratio);
+			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
 
-		puts ("EXPAND:\n");
+			puts ("EXPAND:");
 
-		clock_begin = clock ();
-		expand ();
-		clock_end = clock ();
+			clock_begin = clock ();
+			expand ();
+			clock_end = clock ();
 
-		if (size_out != frame_len)
-			error (1, 0, "length mismatch");
+			if (size_out != size_in)
+				error (1, 0, "length mismatch");
 
-		if (memcmp (frame_text, frame_out, size_out))
-			error (1, 0, "frame mismatch");
+			if (memcmp (frame_in, frame_out, size_out))
+				error (1, 0, "frame mismatch");
 
-		printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
+			printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
+			}
+
 		break;
 		}
 
