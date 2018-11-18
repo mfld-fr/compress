@@ -7,6 +7,7 @@
 #include <memory.h>
 #include <time.h>
 #include <error.h>
+#include <math.h>
 
 
 typedef unsigned char uchar_t;
@@ -39,6 +40,8 @@ typedef struct symbol_s symbol_t;
 #define SYMBOL_MAX 65536  // 64K
 #define PATTERN_MAX (SYMBOL_MAX - BASE_MAX)
 
+// TODO: move symbols from static to dynamic
+
 static symbol_t symbols [SYMBOL_MAX];
 static uint_t sym_count;
 
@@ -49,6 +52,8 @@ static symbol_t * frame_pair [FRAME_MAX];
 static symbol_t pairs [PATTERN_MAX];
 static uint_t pair_count;
 
+
+// TODO: merge index and dynamic table
 
 struct key_sym_s
 	{
@@ -89,6 +94,53 @@ static symbol_t * sym_add (uint_t base, uint_t size)
 	}
 
 
+static void sym_list ()
+	{
+	// Build index and sort
+
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		key_sym_t * key = keys + i;
+		symbol_t * s = symbols + i;
+
+		key->index = s->count;
+		key->sym = s;
+		}
+
+	qsort (keys, sym_count, sizeof (key_sym_t), key_comp);
+
+	// List the used symbols
+
+	uint_t count = 0;
+	double entropy = 0.0;
+
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		key_sym_t * k = keys + i;
+		symbol_t * s = k->sym;
+
+		if (!s->count) break;
+
+		count++;
+
+		double p = (double) s->count / frame_size;
+		entropy += -p * log2 (p);
+
+		printf ("symbol [%u]: ", i);
+
+		if (s->size == 1)
+			printf ("code=%hu ", frame_text [s->base]);
+			else
+			printf ("size=%u ", s->size);
+
+		printf ("count=%u\n", s->count);
+		}
+
+	printf ("\nused symbols=%u\n", count);
+	printf ("entropy=%f\n\n", entropy);
+	}
+
+
 // Scan frame for all base symbols
 
 static void scan_base ()
@@ -109,32 +161,8 @@ static void scan_base ()
 		s->count++;
 		}
 
+	sym_count = BASE_MAX;
 	frame_size = frame_len;
-
-	// Build index and sort
-
-	for (uint_t i = 0; i < BASE_MAX; i++)
-		{
-		key_sym_t * key = keys + i;
-		symbol_t * s = symbols + i;
-
-		key->index = s->count;
-		key->sym = s;
-		}
-
-	qsort (keys, BASE_MAX, sizeof (key_sym_t), key_comp);
-
-	// Truncate the symbol table
-
-	for (uint_t i = 0; i < BASE_MAX; i++)
-		{
-		key_sym_t * k = keys + i;
-		symbol_t * s = k->sym;
-
-		if (!s->count) break;
-
-		sym_count++;
-		}
 	}
 
 
@@ -192,12 +220,19 @@ static void scan_pair ()
 				}
 
 			// Do not count the symmetric pairs
+			// TODO: ugly way to do - better to reject symmetric pairs
 
 			if (p->left == p->right) p->count = 0;
 			}
 		}
+	}
 
-	// Build index and sort
+
+static int shrink_pair ()
+	{
+	int shrink = 0;  // no shrink
+
+	// Build pair index and sort by occurrences
 
 	for (uint_t i = 0; i < pair_count; i++)
 		{
@@ -208,17 +243,9 @@ static void scan_pair ()
 		key->sym = p;
 		}
 
-	// Sort pairs by occurrences
-
 	qsort (keys, pair_count, sizeof (key_sym_t), key_comp);
-	}
 
-
-// Shrink the most redundant pairs
-
-static int shrink_pair ()
-	{
-	int shrink = 0;  // no shrink
+	// Try to shrink all repeated pairs
 
 	for (uint_t i = 0; i < pair_count; i++)
 		{
@@ -330,13 +357,14 @@ int main (int argc, char * argv [])
 			frame_text [frame_len++] = c;
 			}
 
-		printf ("initial:\n  length=%u\n", frame_len);
+		puts ("INITIAL:\n");
+		printf ("frame length=%u\n\n", frame_len);
 
 		memset (symbols, 0, sizeof (symbols));
 		sym_count = 0;
 
 		scan_base ();
-		printf ("  symbols=%u\n\n", sym_count);
+		sym_list ();
 
 		if (frame_len < 3)
 			error (1, 0, "frame too short");
@@ -349,8 +377,9 @@ int main (int argc, char * argv [])
 			if (!shrink_pair ()) break;
 			}
 
-		printf ("final:\n  length=%u\n", frame_size);
-		printf ("  symbols=%u\n\n", sym_count);
+		puts ("FINAL:\n");
+		printf ("frame length=%u\n\n", frame_size);
+		sym_list ();
 
 		double ratio = (double) frame_size / frame_len;
 		printf ("ratio=%f\n", ratio);
