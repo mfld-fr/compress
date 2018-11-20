@@ -263,6 +263,8 @@ static void scan_pair ()
 	list_node_t * node_left = pos_root.next;
 	while (node_left != pos_root.prev->prev)
 		{
+		list_node_t * node_left_next = node_left->next;
+
 		position_t * pos_left = (position_t *) node_left;  // node as first member
 		if (!pos_left->pair)  // skip already found pair
 			{
@@ -271,7 +273,7 @@ static void scan_pair ()
 			pair_t * pair = pair_add (pos_left);
 
 			pair->left = pos_left->sym;
-			pair->right = ((position_t *) (pos_left->node.next))->sym;
+			pair->right = ((position_t *) node_left_next)->sym;
 
 			pos_left->pair = pair;  // pair now found there
 
@@ -280,22 +282,24 @@ static void scan_pair ()
 			list_node_t * node_right = node_left->next;
 			while (node_right != pos_root.prev)
 				{
+				list_node_t * node_right_next = node_right->next;
+
 				position_t * pos_right = (position_t *) node_right;  // node as first member
 
 				if (!pos_right->pair &&  // skip already found pair
 					(pair->left == pos_right->sym) &&
-					(pair->right == ((position_t *) (pos_right->node.next))->sym))
+					(pair->right == ((position_t *) node_right_next)->sym))
 					{
 					pos_right->pair = pair;  // pair now found there
 
 					pair->count++;
 					}
 
-				node_right = node_right->next;
+				node_right = node_right_next;
 				}
 			}
 
-		node_left = node_left->next;
+		node_left = node_left_next;
 		}
 	}
 
@@ -338,8 +342,12 @@ static int shrink_pair ()
 		symbol_t * sym = NULL;
 
 		list_node_t * node = (list_node_t *) pair->base;  // node as first member
+		list_node_t * node_prev = node->prev;
+
 		while ((node != pos_root.prev) && (node != &pos_root))  // also check shifted limit
 			{
+			list_node_t * node_next = node->next;
+
 			position_t * pos = (position_t *) node;  // node as first member
 			if (pos->pair == pair)
 				{
@@ -350,7 +358,7 @@ static int shrink_pair ()
 
 				if (node != pos_root.next)
 					{
-					pair_left = ((position_t *) (node->prev))->pair;
+					pair_left = ((position_t *) node_prev)->pair;
 
 					// Filter symmetric pairs
 
@@ -365,7 +373,7 @@ static int shrink_pair ()
 				uint_t count_right = 0;
 				if (node != pos_root.prev->prev)
 					{
-					pair_right = ((position_t *) (node->next))->pair;
+					pair_right = ((position_t *) node_next)->pair;
 
 					// Filter symmetric pairs
 
@@ -406,14 +414,17 @@ static int shrink_pair ()
 					pos->sym = sym;
 					pos->pair = NULL;  // no more pair here
 
-					list_remove (node->next);
+					list_remove (node_next);
+					free ((position_t *) node_next);  // node as first member
+
 					pos_size--;
 
 					shrink = 1;
 					}
 				}
 
-			node = node->next;
+			node_prev = node;
+			node = node_next;
 			}
 		}
 
@@ -548,7 +559,7 @@ int main (int argc, char * argv [])
 			if (memcmp (frame_in, frame_out, size_out))
 				error (1, 0, "frame mismatch");
 
-			printf ("elapsed=%lu usecs\n", (clock_end - clock_begin));
+			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
 			}
 
 		break;
