@@ -111,27 +111,22 @@ static index_pair_t index_pair [PAIR_MAX];
 
 // Program options
 
-uchar_t opt_sym_list;
+uchar_t opt_sym;
+uchar_t opt_shrink;
 
 
 static int sym_comp (const void * v1, const void * v2)
 	{
-	index_sym_t * i1 = (index_sym_t * ) v1;
-	index_sym_t * i2 = (index_sym_t * ) v2;
-
-	uint_t k1 = i1->key;
-	uint_t k2 = i2->key;
+	uint_t k1 = ((index_sym_t *) v1)->key;
+	uint_t k2 = ((index_sym_t *) v2)->key;
 
 	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
 	}
 
 static int pair_comp (const void * v1, const void * v2)
 	{
-	index_pair_t * i1 = (index_pair_t * ) v1;
-	index_pair_t * i2 = (index_pair_t * ) v2;
-
-	uint_t k1 = i1->key;
-	uint_t k2 = i2->key;
+	uint_t k1 = ((index_sym_t *) v1)->key;
+	uint_t k2 = ((index_sym_t *) v2)->key;
 
 	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
 	}
@@ -143,8 +138,6 @@ static symbol_t * sym_add (uint_t base, uint_t size)
 		error (1, 0, "too many symbols");
 
 	symbol_t * s = symbols + sym_count++;
-
-	memset (s, 0, sizeof (symbol_t));  // erase if previously used
 
 	s->size = size;
 	s->base = base;
@@ -351,12 +344,12 @@ static int shrink_pair ()
 			position_t * pos = (position_t *) node;  // node as first member
 			if (pos->pair == pair)
 				{
-				// Consider left neighbor pair
+				// Consider pair at left position
 
 				pair_t * pair_left = NULL;
 				uint_t count_left = 0;
 
-				if (node != pos_root.next)
+				if (node_prev != &pos_root)
 					{
 					pair_left = ((position_t *) node_prev)->pair;
 
@@ -367,11 +360,11 @@ static int shrink_pair ()
 
 					}
 
-				// Consider right neighbor pair
+				// Consider pair at right position
 
 				pair_t * pair_right = NULL;
 				uint_t count_right = 0;
-				if (node != pos_root.prev->prev)
+				if (node_next != pos_root.prev)
 					{
 					pair_right = ((position_t *) node_next)->pair;
 
@@ -409,10 +402,17 @@ static int shrink_pair ()
 					sym->count++;
 
 					// Replace current pair by the new symbol
-					// and shift the frame left
 
 					pos->sym = sym;
-					pos->pair = NULL;  // no more pair here
+
+					// Invalidate previous & current pair
+
+					pos->pair = NULL;
+
+					if (node_prev != &pos_root)
+						((position_t *) node_prev)->pair = NULL;  // node as first member
+
+					// Shift the frame end to left
 
 					list_remove (node_next);
 					free ((position_t *) node_next);  // node as first member
@@ -434,10 +434,6 @@ static int shrink_pair ()
 
 static void compress ()
 	{
-	// Base symbol scan
-
-	scan_base ();
-
 	// Iterate on pair scan & shrink
 
 	while (1)
@@ -488,13 +484,17 @@ int main (int argc, char * argv [])
 
 		while (1)
 			{
-			opt = getopt (argc, argv, "s");
+			opt = getopt (argc, argv, "cs");
 			if (opt < 0 || opt == '?') break;
 
 			switch (opt)
 				{
-				case 's':  // dump symbols
-					opt_sym_list = 1;
+				case 's':  // list symbols
+					opt_sym = 1;
+					break;
+
+				case 'c':  // compress
+					opt_shrink = 1;
 					break;
 
 				}
@@ -503,7 +503,8 @@ int main (int argc, char * argv [])
 		if (opt == '?' || optind != argc - 1)
 			{
 			printf ("usage: %s [options] [input file]\n\n", argv [0]);
-			puts ("  -s  list input symbols");
+			puts ("  -s  list symbols");
+			puts ("  -c  compress");
 			break;
 			}
 
@@ -524,12 +525,11 @@ int main (int argc, char * argv [])
 		puts ("INITIAL:");
 		printf ("frame length=%u\n\n", size_in);
 
-		if (opt_sym_list)
-			{
-			scan_base ();
-			sym_list ();
-			}
-		else
+		scan_base ();
+
+		if (opt_sym) sym_list ();
+
+		if (opt_shrink)
 			{
 			if (size_in < 3)
 				error (1, 0, "frame too short");
@@ -540,14 +540,16 @@ int main (int argc, char * argv [])
 			clock_t clock_end = clock ();
 			puts (" DONE\n");
 
-			puts ("COMPRESS:");
+			puts ("FINAL:");
 			printf ("frame length=%u\n", pos_size);
 
 			double ratio = (double) pos_size / size_in;
 			printf ("ratio=%f\n", ratio);
 			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
 
-			puts ("EXPAND:");
+			if (opt_sym) sym_list ();
+
+			puts ("TEST:");
 
 			clock_begin = clock ();
 			expand ();

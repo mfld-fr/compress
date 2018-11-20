@@ -1,1 +1,4 @@
+abab
+abcabc
+abcabbc
 aabbaabbababab

@@ -47,16 +47,12 @@ Decompression is much simpler. It decodes the bit stream, rebuild the symbol
 tree from the table, iterates on the sequence and recursively walks the tree.
 
 
-STATUS:
+STATUS
 
+- still WIP
 - asymmetric pairing implemented
 - internal loopback test OK
-- good ratio on symbols
+- already good ratio on symbols
 
 
-TODO:
-
-- optimize pairing
-- repeated symbols
-- bitstream output / input
-- standalone decompression
+See TODO.txt for next steps
