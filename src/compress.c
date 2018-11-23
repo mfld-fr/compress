@@ -98,16 +98,6 @@ typedef struct index_sym_s index_sym_t;
 
 static index_sym_t index_sym [SYMBOL_MAX];
 
-struct index_pair_s
-	{
-	uint_t key;
-	pair_t * pair;
-	};
-
-typedef struct index_pair_s index_pair_t;
-
-static index_pair_t index_pair [PAIR_MAX];
-
 
 // Program options
 
@@ -116,14 +106,6 @@ uchar_t opt_shrink;
 
 
 static int sym_comp (const void * v1, const void * v2)
-	{
-	uint_t k1 = ((index_sym_t *) v1)->key;
-	uint_t k2 = ((index_sym_t *) v2)->key;
-
-	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
-	}
-
-static int pair_comp (const void * v1, const void * v2)
 	{
 	uint_t k1 = ((index_sym_t *) v1)->key;
 	uint_t k2 = ((index_sym_t *) v2)->key;
@@ -213,8 +195,10 @@ static void scan_base ()
 			}
 
 		position_t * pos = malloc (sizeof (position_t));
-		list_add_tail (&pos_root, &(pos->node));
+		list_add_tail (&pos_root, (list_node_t *) pos);  // node as first member
+
 		pos->sym = sym;
+		pos->pair = NULL;
 
 		sym->count++;
 		}
@@ -238,23 +222,12 @@ static pair_t * pair_add (position_t * base)
 	}
 
 
-// Scan frame for all pairs
+// Scan frame for new pairs
 
 static void scan_pair ()
 	{
-	list_node_t * node = pos_root.next;
-	while (node != &pos_root)
-		{
-		position_t * pos = (position_t *) node;  // node as first member
-		pos->pair = NULL;
-		node = node->next;
-		}
-
-	memset (pairs , 0, sizeof pairs);
-	pair_count = 0;
-
 	list_node_t * node_left = pos_root.next;
-	while (node_left != pos_root.prev->prev)
+	while ((node_left != pos_root.prev) && (node_left != &pos_root))
 		{
 		list_node_t * node_left_next = node_left->next;
 
@@ -273,7 +246,7 @@ static void scan_pair ()
 			// Scan for pair duplicates
 
 			list_node_t * node_right = node_left->next;
-			while (node_right != pos_root.prev)
+			while ((node_right != pos_root.prev) && (node_right != &pos_root))
 				{
 				list_node_t * node_right_next = node_right->next;
 
@@ -297,135 +270,92 @@ static void scan_pair ()
 	}
 
 
-static int shrink_pair ()
+// Crunch all occurrences of one pair
+
+static int crunch_pair (pair_t * pair)
 	{
 	int shrink = 0;  // no shrink
 
-	// Build pair index and sort by occurrences
-	// TODO: is this really necessary - not the maximum ?
+	// Check all pair occurrences
 
-	for (uint_t i = 0; i < pair_count; i++)
+	symbol_t * sym = NULL;
+
+	list_node_t * node = (list_node_t *) pair->base;  // node as first member
+	list_node_t * node_prev = node->prev;
+
+	while ((node != pos_root.prev) && (node != &pos_root))
 		{
-		index_pair_t * index = index_pair + i;
-		pair_t * pair = pairs + i;
+		list_node_t * node_next = node->next;
 
-		index->key = pair->count;
-		index->pair = pair;
-		}
-
-	qsort (index_pair, pair_count, sizeof (index_pair_t), pair_comp);
-
-	// Try to shrink all repeated pairs
-
-	for (uint_t i = 0; i < pair_count; i++)
-		{
-		index_pair_t * k = index_pair + i;
-		pair_t * pair = k->pair;
-
-		// Skip the symmetric pairs
-
-		if (pair->left == pair->right) continue;
-
-		// Skip any singleton or invalid pairs
-
-		if (pair->count < 2) continue;
-
-		// Check all pair occurrences
-
-		symbol_t * sym = NULL;
-
-		list_node_t * node = (list_node_t *) pair->base;  // node as first member
-		list_node_t * node_prev = node->prev;
-
-		while ((node != pos_root.prev) && (node != &pos_root))  // also check shifted limit
+		position_t * pos = (position_t *) node;  // node as first member
+		if (pos->pair == pair)
 			{
-			list_node_t * node_next = node->next;
+			// Consider previous pair
 
-			position_t * pos = (position_t *) node;  // node as first member
-			if (pos->pair == pair)
+			position_t * pos_prev = NULL;
+			pair_t * pair_prev = NULL;
+
+			if (node_prev != &pos_root)
 				{
-				// Consider pair at left position
-
-				pair_t * pair_left = NULL;
-				uint_t count_left = 0;
-
-				if (node_prev != &pos_root)
-					{
-					pair_left = ((position_t *) node_prev)->pair;
-
-					// Filter symmetric pairs
-
-					if (pair_left && (pair_left->left != pair_left->right))
-						count_left = pair_left->count;
-
-					}
-
-				// Consider pair at right position
-
-				pair_t * pair_right = NULL;
-				uint_t count_right = 0;
-				if (node_next != pos_root.prev)
-					{
-					pair_right = ((position_t *) node_next)->pair;
-
-					// Filter symmetric pairs
-
-					if (pair_right && (pair_right->left != pair_right->right))
-						count_right = pair_right->count;
-
-					}
-
-				// Can shrink if stronger than neighbors
-
-				if ((count_left <= pair->count) && (pair->count >= count_right))
-					{
-					// Invalidate neighbor pairs
-
-					if (pair_left) pair_left->count = 0;
-					if (pair_right) pair_right->count = 0;
-
-					// Create a new symbol from the pair
-
-					if (!sym)
-						{
-						sym = sym_add (0, 2);
-
-						sym->left = pair->left;
-						sym->right = pair->right;
-						}
-
-					// Update symbol counts
-
-					sym->left->count--;
-					sym->right->count--;
-
-					sym->count++;
-
-					// Replace current pair by the new symbol
-
-					pos->sym = sym;
-
-					// Invalidate previous & current pair
-
-					pos->pair = NULL;
-
-					if (node_prev != &pos_root)
-						((position_t *) node_prev)->pair = NULL;  // node as first member
-
-					// Shift the frame end to left
-
-					list_remove (node_next);
-					free ((position_t *) node_next);  // node as first member
-
-					pos_size--;
-
-					shrink = 1;
-					}
+				pos_prev = (position_t *) node_prev;  // node as first member
+				pair_prev = pos_prev->pair;
+				if (pair_prev) pair_prev->count--;
+				pos_prev->pair = NULL;
 				}
 
-			node_prev = node;
-			node = node_next;
+			// Consider next pair
+
+			position_t * pos_next = NULL;
+			pair_t * pair_next = NULL;
+
+			if ((node_next != pos_root.prev) && (node_next != &pos_root))
+				{
+				pos_next = (position_t *) node_next;  // node as first member
+				pair_next = pos_next->pair;
+				if (pair_next) pair_next->count--;
+				pos_next->pair = NULL;
+				}
+
+			// Consider current pair
+
+			if (pair->count == 0)
+				{
+				puts ("BREAK");
+				}
+
+			pair->count--;
+			pos->pair = NULL;
+
+			// Replace current pair by new symbol
+
+			if (!sym)
+				{
+				sym = sym_add (0, 2);
+
+				sym->left = pair->left;
+				sym->right = pair->right;
+				}
+
+			sym->left->count--;
+			sym->right->count--;
+			sym->count++;
+
+			pos->sym = sym;
+
+			// Shift frame end to left
+
+			list_node_t * node_after = node_next->next;
+			list_remove (node_next);
+			free ((position_t *) node_next);  // node as first member
+			node_next = node_after;
+
+			pos_size--;
+
+			shrink = 1;
 			}
+
+		node_prev = node;
+		node = node_next;
 		}
 
 	return shrink;
@@ -434,12 +364,36 @@ static int shrink_pair ()
 
 static void compress ()
 	{
-	// Iterate on pair scan & shrink
+	// Iterate on pair scan & crunch
 
 	while (1)
 		{
 		scan_pair ();
-		if (!shrink_pair ()) break;
+
+		// Look for the pair the most duplicated
+
+		uint_t count_max = 0;
+		pair_t * pair_max = NULL;
+
+		for (uint_t i = 0; i < pair_count; i++)
+			{
+			pair_t * pair = pairs + i;
+
+			// Skip any symmetric pair
+
+			if (pair->left == pair->right) continue;
+
+			uint_t count = pair->count;
+			if (count > count_max)
+				{
+				count_max = count;
+				pair_max = pair;
+				}
+			}
+
+		if (count_max < 2) break;
+
+		if (!crunch_pair (pair_max)) break;
 		}
 	}
 
