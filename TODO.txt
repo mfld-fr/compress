@@ -1,15 +1,9 @@
 
 - quick sort on list
 - move symbol array to list
-- move pair array to list
 
-- incremental pair scan
-- no more invalidate by count reset
-- replace pair sort by maximum
-- one pass to scan then crunch one pair
 - add reference count in symbol
 - shrink symbol tree
 
 - add repeat symbol in sequence
 - add repeat symbol in symbol
-- crunch symmetric pairs starting from left

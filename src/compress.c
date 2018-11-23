@@ -53,11 +53,12 @@ typedef struct symbol_s symbol_t;
 static symbol_t symbols [SYMBOL_MAX];
 static uint_t sym_count;
 
+
 struct pair_s;
 
 struct position_s
 	{
-	list_node_t node;  // must be the first element
+	list_node_t node;  // must be the first member
 
 	symbol_t * sym;
 	struct pair_s * pair;
@@ -66,15 +67,14 @@ struct position_s
 typedef struct position_s position_t;
 
 static list_node_t pos_root;
-static uint_t pos_size;
+static uint_t pos_count;
 
-#define PAIR_MAX (SYMBOL_MAX - CODE_MAX)
 
 struct pair_s
 	{
-	uint_t count;
+	list_node_t node;  // must be the first member
 
-	position_t * base;  // position of first occurrence
+	uint_t count;
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -82,8 +82,7 @@ struct pair_s
 
 typedef struct pair_s pair_t;
 
-static pair_t pairs [PAIR_MAX];
-static uint_t pair_count;
+static list_node_t pair_root;
 
 
 // Indexes for quick sort
@@ -157,7 +156,7 @@ static void sym_list ()
 
 		count++;
 
-		double p = (double) s->count / pos_size;
+		double p = (double) s->count / pos_count;
 		entropy += -p * log2 (p);
 
 		printf ("symbol [%u]: ", i);
@@ -204,21 +203,7 @@ static void scan_base ()
 		}
 
 	sym_count = CODE_MAX;
-	pos_size = size_in;
-	}
-
-
-static pair_t * pair_add (position_t * base)
-	{
-	if (pair_count >= PAIR_MAX)
-		error (1, 0, "too many pairs");
-
-	pair_t * pair = pairs +  pair_count++;
-
-	pair->base = base;
-	pair->count = 1;
-
-	return pair;
+	pos_count = size_in;
 	}
 
 
@@ -236,7 +221,10 @@ static void scan_pair ()
 			{
 			// Add new pair
 
-			pair_t * pair = pair_add (pos_left);
+			pair_t * pair = malloc (sizeof (pair_t));
+			list_add_tail (&pair_root, (list_node_t *) pair);  // node as first member
+
+			pair->count = 1;
 
 			pair->left = pos_left->sym;
 			pair->right = ((position_t *) node_left_next)->sym;
@@ -270,6 +258,20 @@ static void scan_pair ()
 	}
 
 
+static void dec_pair (pair_t * pair)
+	{
+	if (pair)
+		{
+		pair->count--;
+
+		if (!pair->count)
+			{
+			list_remove ((list_node_t *) pair);  // node as first member
+			free (pair);
+			}
+		}
+	}
+
 // Crunch all occurrences of one pair
 
 static int crunch_pair (pair_t * pair)
@@ -280,8 +282,8 @@ static int crunch_pair (pair_t * pair)
 
 	symbol_t * sym = NULL;
 
-	list_node_t * node = (list_node_t *) pair->base;  // node as first member
-	list_node_t * node_prev = node->prev;
+	list_node_t * node = pos_root.next;
+	list_node_t * node_prev = &pos_root;
 
 	while ((node != pos_root.prev) && (node != &pos_root))
 		{
@@ -292,39 +294,21 @@ static int crunch_pair (pair_t * pair)
 			{
 			// Consider previous pair
 
-			position_t * pos_prev = NULL;
-			pair_t * pair_prev = NULL;
-
 			if (node_prev != &pos_root)
 				{
-				pos_prev = (position_t *) node_prev;  // node as first member
-				pair_prev = pos_prev->pair;
-				if (pair_prev) pair_prev->count--;
+				position_t * pos_prev = (position_t *) node_prev;  // node as first member
+				dec_pair (pos_prev->pair);
 				pos_prev->pair = NULL;
 				}
 
 			// Consider next pair
 
-			position_t * pos_next = NULL;
-			pair_t * pair_next = NULL;
-
 			if ((node_next != pos_root.prev) && (node_next != &pos_root))
 				{
-				pos_next = (position_t *) node_next;  // node as first member
-				pair_next = pos_next->pair;
-				if (pair_next) pair_next->count--;
+				position_t * pos_next = (position_t *) node_next;  // node as first member
+				dec_pair (pos_next->pair);
 				pos_next->pair = NULL;
 				}
-
-			// Consider current pair
-
-			if (pair->count == 0)
-				{
-				puts ("BREAK");
-				}
-
-			pair->count--;
-			pos->pair = NULL;
 
 			// Replace current pair by new symbol
 
@@ -342,6 +326,9 @@ static int crunch_pair (pair_t * pair)
 
 			pos->sym = sym;
 
+			dec_pair (pair);
+			pos->pair = NULL;
+
 			// Shift frame end to left
 
 			list_node_t * node_after = node_next->next;
@@ -349,7 +336,7 @@ static int crunch_pair (pair_t * pair)
 			free ((position_t *) node_next);  // node as first member
 			node_next = node_after;
 
-			pos_size--;
+			pos_count--;
 
 			shrink = 1;
 			}
@@ -366,6 +353,8 @@ static void compress ()
 	{
 	// Iterate on pair scan & crunch
 
+	list_init (&pair_root);
+
 	while (1)
 		{
 		scan_pair ();
@@ -375,20 +364,24 @@ static void compress ()
 		uint_t count_max = 0;
 		pair_t * pair_max = NULL;
 
-		for (uint_t i = 0; i < pair_count; i++)
+		list_node_t * node = pair_root.next;
+		while (node != &pair_root)
 			{
-			pair_t * pair = pairs + i;
+			pair_t * pair = (pair_t *) node;  // node as first member
 
 			// Skip any symmetric pair
 
-			if (pair->left == pair->right) continue;
-
-			uint_t count = pair->count;
-			if (count > count_max)
+			if (pair->left != pair->right)
 				{
-				count_max = count;
-				pair_max = pair;
+				uint_t count = pair->count;
+				if (count > count_max)
+					{
+					count_max = count;
+					pair_max = pair;
+					}
 				}
+
+			node = node->next;
 			}
 
 		if (count_max < 2) break;
@@ -495,9 +488,9 @@ int main (int argc, char * argv [])
 			puts (" DONE\n");
 
 			puts ("FINAL:");
-			printf ("frame length=%u\n", pos_size);
+			printf ("frame length=%u\n", pos_count);
 
-			double ratio = (double) pos_size / size_in;
+			double ratio = (double) pos_count / size_in;
 			printf ("ratio=%f\n", ratio);
 			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
 
