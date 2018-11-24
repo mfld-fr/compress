@@ -27,18 +27,20 @@ static uint_t size_in;
 static uchar_t frame_out [FRAME_MAX];
 static uint_t size_out;
 
+
 // Symbol definitions
 
 struct symbol_s
 	{
-	uint_t count;  // number of symbol occurrences
+	list_node_t node;  // must be the first member
 
-	// For leaf symbol
+	uint_t pos_count;  // number of occurrences in the frame
+	uint_t sym_count;  // number of occurrences in the tree
 
-	uint_t base;   // offset of first occurrence in input frame
-	uint_t size;   // size in input codes
+	uint_t base;  // offset of first occurrence in input frame
+	uint_t size;  // size in input codes
 
-	// For node symbol
+	// For node symbol (secondary)
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -46,13 +48,11 @@ struct symbol_s
 
 typedef struct symbol_s symbol_t;
 
-#define SYMBOL_MAX 65536  // 64K
-
-// TODO: move symbols from static to dynamic
-
-static symbol_t symbols [SYMBOL_MAX];
+static list_node_t sym_root;
 static uint_t sym_count;
 
+
+// Pair definitions
 
 struct pair_s;
 
@@ -74,7 +74,7 @@ struct pair_s
 	{
 	list_node_t node;  // must be the first member
 
-	uint_t count;
+	uint_t count;  // number of occurrences in the frame
 
 	struct symbol_s * left;
 	struct symbol_s * right;
@@ -86,6 +86,8 @@ static list_node_t pair_root;
 
 
 // Indexes for quick sort
+
+#define SYMBOL_MAX 65536  // 64K
 
 struct index_sym_s
 	{
@@ -113,17 +115,20 @@ static int sym_comp (const void * v1, const void * v2)
 	}
 
 
-static symbol_t * sym_add (uint_t base, uint_t size)
+static symbol_t * sym_add ()
 	{
 	if (sym_count >= SYMBOL_MAX)
 		error (1, 0, "too many symbols");
 
-	symbol_t * s = symbols + sym_count++;
+	symbol_t * sym = malloc (sizeof (symbol_t));
 
-	s->size = size;
-	s->base = base;
+	sym->pos_count = 0;
+	sym->sym_count = 0;
 
-	return s;
+	list_add_tail (&sym_root, (list_node_t *) sym);  // node as first member
+	sym_count++;
+
+	return sym;
 	}
 
 
@@ -131,45 +136,45 @@ static void sym_list ()
 	{
 	// Build index and sort
 
+	list_node_t * node = sym_root.next;
 	for (uint_t i = 0; i < sym_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
-		symbol_t * s = symbols + i;
+		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		index->key = s->count;
-		index->sym = s;
+		index->key = sym->pos_count + sym->sym_count;  // number of duplicates
+		index->sym = sym;
+
+		node = node->next;
 		}
 
 	qsort (index_sym, sym_count, sizeof (index_sym_t), sym_comp);
 
 	// List the used symbols
 
-	uint_t count = 0;
 	double entropy = 0.0;
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
-		index_sym_t * k = index_sym + i;
-		symbol_t * s = k->sym;
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
 
-		if (!s->count) break;
+		uint_t sym_dup = sym->pos_count + sym->sym_count;
 
-		count++;
-
-		double p = (double) s->count / pos_count;
+		double p = (double) sym_dup / (pos_count + sym_count);
 		entropy += -p * log2 (p);
 
-		printf ("symbol [%u]: ", i);
+		printf ("symbol [%u]: base=%u ", i, sym->base);
 
-		if (s->size == 1)
-			printf ("code=%hu ", frame_in [s->base]);
-			else
-			printf ("size=%u ", s->size);
+		if (sym->size == 1)
+			printf ("code=%hu", frame_in [sym->base]);
+		else
+			printf ("size=%u", sym->size);
 
-		printf ("count=%u\n", s->count);
+		printf (" pos=%u sym=%u\n", sym->pos_count, sym->sym_count);
 		}
 
-	printf ("\nused symbols=%u\n", count);
+	printf ("\nsymbol count=%u\n", sym_count);
 	printf ("entropy=%f\n\n", entropy);
 	}
 
@@ -178,19 +183,29 @@ static void sym_list ()
 
 static void scan_base ()
 	{
-	memset (symbols, 0, sizeof symbols);
+	list_init (&sym_root);
 	list_init (&pos_root);
+
+	memset (index_sym, 0, sizeof (index_sym_t) * CODE_MAX);
 
 	// Count symbol occurrences
 
 	for (uint_t i = 0; i < size_in; i++)
 		{
-		symbol_t * sym = symbols + (uint_t) frame_in [i];
+		index_sym_t * index = index_sym + (uint_t) frame_in [i];
+		symbol_t * sym = index->sym;
 
-		if (!sym->count)
+		if (!sym)
 			{
+			sym = sym_add ();
+
 			sym->base = i;
 			sym->size = 1;
+
+			sym->left = NULL;
+			sym->right = NULL;
+
+			index->sym = sym;
 			}
 
 		position_t * pos = malloc (sizeof (position_t));
@@ -199,10 +214,9 @@ static void scan_base ()
 		pos->sym = sym;
 		pos->pair = NULL;
 
-		sym->count++;
+		sym->pos_count++;
 		}
 
-	sym_count = CODE_MAX;
 	pos_count = size_in;
 	}
 
@@ -312,17 +326,26 @@ static int crunch_pair (pair_t * pair)
 
 			// Replace current pair by new symbol
 
+			symbol_t * sym_left = pair->left;
+			symbol_t * sym_right = pair->right;
+
 			if (!sym)
 				{
-				sym = sym_add (0, 2);
+				sym = sym_add ();
 
-				sym->left = pair->left;
-				sym->right = pair->right;
+				sym->base = sym_left->base;
+				sym->size = sym_left->size + sym_right->size;
+
+				sym->left = sym_left;
+				sym_left->sym_count++;
+
+				sym->right = sym_right;
+				sym_right->sym_count++;
 				}
 
-			sym->left->count--;
-			sym->right->count--;
-			sym->count++;
+			sym_left->pos_count--;
+			sym_right->pos_count--;
+			sym->pos_count++;
 
 			pos->sym = sym;
 
@@ -391,16 +414,16 @@ static void compress ()
 	}
 
 
-static void exp_sym (symbol_t * s)
+static void exp_sym (symbol_t * sym)
 	{
-	if (s->size == 1)
+	if (!sym->left)
 		{
-		frame_out [size_out++] = frame_in [s->base];
+		frame_out [size_out++] = frame_in [sym->base];
 		}
 	else
 		{
-		exp_sym (s->left);
-		exp_sym (s->right);
+		exp_sym (sym->left);
+		exp_sym (sym->right);
 		}
 	}
 

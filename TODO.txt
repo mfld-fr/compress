@@ -1,9 +1,8 @@
 
 - quick sort on list
-- move symbol array to list
 
-- add reference count in symbol
-- shrink symbol tree
+- repeat symbol in frame
+- repeat symbol in symbol
 
-- add repeat symbol in sequence
-- add repeat symbol in symbol
+- bit stream from file
+- bit stream to file
