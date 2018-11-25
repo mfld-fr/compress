@@ -1,14 +1,15 @@
-echo "Compressing data..."
-Release/compress -sc data.bin > data.txt
-diff --color data.0.txt data.txt
-echo ""
+if [ $# -ne 1 ]; then
+	echo "Missing input file !"
+	exit 1
+	fi
 
-echo "Compressing code..."
-Release/compress -sc code.bin > code.txt
-diff --color code.0.txt code.txt
-echo ""
+echo "Compressing..."
+Release/compress -scv $1 test_out.bin > test.txt
 
-echo "Compressing ash..."
-Release/compress -sc ash.bin > ash.txt
-diff --color ash.0.txt ash.txt
-echo ""
+echo "Expanding..."
+Release/compress -ev test_out.bin test_in.bin >> test.txt
+
+echo "Comparing..."
+dump $1 > $1.txt
+dump test_in.bin > test_in.txt
+diff --color $1.txt test_in.txt

@@ -2,7 +2,10 @@
 - quick sort on list
 
 - repeat symbol in frame
-- repeat symbol in symbol
+- repeat symbol in tree
 
-- bit stream from file
-- bit stream to file
+- binary tree structure
+- binary tree coding
+- binary tree decoding
+
+- Huffman coding of symbol index

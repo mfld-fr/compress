@@ -3,7 +3,6 @@
 //------------------------------------------------------------------------------
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <memory.h>
 #include <time.h>
 #include <error.h>
@@ -11,21 +10,7 @@
 #include <unistd.h>
 
 #include "list.h"
-
-typedef unsigned char uchar_t;
-typedef unsigned int uint_t;
-
-
-// Frame of codes
-
-#define CODE_MAX 256  // 8 bits
-#define FRAME_MAX 65536  // 64K
-
-static uchar_t frame_in [FRAME_MAX];
-static uint_t size_in;
-
-static uchar_t frame_out [FRAME_MAX];
-static uint_t size_out;
+#include "stream.h"
 
 
 // Symbol definitions
@@ -37,8 +22,12 @@ struct symbol_s
 	uint_t pos_count;  // number of occurrences in the frame
 	uint_t sym_count;  // number of occurrences in the tree
 
+	uchar_t code;
+
 	uint_t base;  // offset of first occurrence in input frame
 	uint_t size;  // size in input codes
+
+	uint_t index;
 
 	// For node symbol (secondary)
 
@@ -103,7 +92,9 @@ static index_sym_t index_sym [SYMBOL_MAX];
 // Program options
 
 uchar_t opt_sym;
-uchar_t opt_shrink;
+uchar_t opt_compress;
+uchar_t opt_expand;
+uchar_t opt_verb;
 
 
 static int sym_comp (const void * v1, const void * v2)
@@ -132,7 +123,7 @@ static symbol_t * sym_add ()
 	}
 
 
-static void sym_list ()
+static void sym_sort ()
 	{
 	// Build index and sort
 
@@ -150,8 +141,21 @@ static void sym_list ()
 
 	qsort (index_sym, sym_count, sizeof (index_sym_t), sym_comp);
 
-	// List the used symbols
+	// Set symbol indexes
 
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
+		sym->index = i;
+		}
+	}
+
+
+// List the used symbols
+
+static void sym_list ()
+	{
 	double entropy = 0.0;
 
 	for (uint_t i = 0; i < sym_count; i++)
@@ -164,7 +168,7 @@ static void sym_list ()
 		double p = (double) sym_dup / (pos_count + sym_count);
 		entropy += -p * log2 (p);
 
-		printf ("symbol [%u]: base=%u ", i, sym->base);
+		printf ("[%u] base=%u ", i, sym->base);
 
 		if (sym->size == 1)
 			printf ("code=%hu", frame_in [sym->base]);
@@ -372,7 +376,7 @@ static int crunch_pair (pair_t * pair)
 	}
 
 
-static void compress ()
+static void crunch_word ()
 	{
 	// Iterate on pair scan & crunch
 
@@ -414,7 +418,91 @@ static void compress ()
 	}
 
 
-static void exp_sym (symbol_t * sym)
+// Compression with "base" (no compression)
+
+static void compress_b ()
+	{
+	list_node_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+		out_byte (frame_in [sym->base]);
+		node = node->next;
+		}
+	}
+
+
+// Decompression with "base" (no decompression)
+
+static void expand_b ()
+	{
+	for (uint_t i = 0; i < size_in; i++)
+		{
+		out_byte (frame_in [i]);
+		}
+	}
+
+
+// Compression with "prefixed base"
+
+static void compress_pb ()
+	{
+	if (!opt_sym) sym_sort ();
+
+	out_prefix (sym_count);
+
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
+		out_code (frame_in [sym->base], 8);
+		}
+
+	out_prefix (pos_count);
+
+	list_node_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+		out_prefix (sym->index);
+		node = node->next;
+		}
+
+	out_pad ();
+	}
+
+
+// Decompression with "prefixed base"
+
+static void expand_pb ()
+	{
+	uint_t count = in_prefix ();
+
+	list_init (&sym_root);
+
+	for (uint_t i = 0; i < count; i++)
+		{
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = sym_add ();
+		sym->code = in_code (8);
+		index->sym = sym;
+		}
+
+	count = in_prefix ();
+
+	for (uint_t p = 0; p < count; p++)
+		{
+		uint_t i = in_prefix ();
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
+		out_byte (sym->code);
+		}
+	}
+
+
+static void expand_sym (symbol_t * sym)
 	{
 	if (!sym->left)
 		{
@@ -422,8 +510,8 @@ static void exp_sym (symbol_t * sym)
 		}
 	else
 		{
-		exp_sym (sym->left);
-		exp_sym (sym->right);
+		expand_sym (sym->left);
+		expand_sym (sym->right);
 		}
 	}
 
@@ -437,7 +525,7 @@ static void expand ()
 		{
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
-		exp_sym (sym);
+		expand_sym (sym);
 
 		node = node->next;
 		}
@@ -446,7 +534,7 @@ static void expand ()
 
 int main (int argc, char * argv [])
 	{
-	FILE * f = NULL;
+	clock_t clock_begin = clock ();
 
 	while (1)
 		{
@@ -454,90 +542,105 @@ int main (int argc, char * argv [])
 
 		while (1)
 			{
-			opt = getopt (argc, argv, "cs");
+			opt = getopt (argc, argv, "cesv");
 			if (opt < 0 || opt == '?') break;
 
 			switch (opt)
 				{
+				case 'c':  // compress
+					opt_compress = 1;
+					break;
+
+				case 'e':  // expand
+					opt_expand = 1;
+					break;
+
 				case 's':  // list symbols
 					opt_sym = 1;
 					break;
 
-				case 'c':  // compress
-					opt_shrink = 1;
+				case 'v':  // verbose
+					opt_verb = 1;
 					break;
 
 				}
 			}
 
-		if (opt == '?' || optind != argc - 1)
+		if (opt == '?' || optind != argc - 2 || (opt_compress == opt_expand))
 			{
-			printf ("usage: %s [options] [input file]\n\n", argv [0]);
-			puts ("  -s  list symbols");
+			printf ("usage: %s (-c | -e) [-sv] [input file] [output file]\n\n", argv [0]);
 			puts ("  -c  compress");
+			puts ("  -e  expand");
+			puts ("  -s  list symbols");
+			puts ("  -v  verbose");
 			break;
 			}
 
-		f = fopen (argv [optind], "r");
-		if (!f) break;
+		in_frame (argv [optind]);
 
-		while (1)
+		if (opt_compress)
 			{
-			int c = fgetc (f);
-			if (c < 0 || c > 255) break;
+			if (opt_verb)
+				{
+				puts ("INITIAL");
+				printf ("frame length=%u\n\n", size_in);
+				}
 
-			if (size_in >= FRAME_MAX)
-				error (1, 0, "frame too long");
-
-			frame_in [size_in++] = c;
-			}
-
-		puts ("INITIAL:");
-		printf ("frame length=%u\n\n", size_in);
-
-		scan_base ();
-
-		if (opt_sym) sym_list ();
-
-		if (opt_shrink)
-			{
 			if (size_in < 3)
 				error (1, 0, "frame too short");
 
-			printf ("Compressing...");
-			clock_t clock_begin = clock ();
-			compress ();
-			clock_t clock_end = clock ();
-			puts (" DONE\n");
+			scan_base ();
 
-			puts ("FINAL:");
-			printf ("frame length=%u\n", pos_count);
+			if (opt_sym)
+				{
+				sym_sort ();
+				sym_list ();
+				}
 
-			double ratio = (double) pos_count / size_in;
-			printf ("ratio=%f\n", ratio);
-			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
+			if (opt_verb) printf ("Compressing...");
 
-			if (opt_sym) sym_list ();
+			/*
+			shrink_frame ();
+			*/
 
-			puts ("TEST:");
+			//compress_b ();
+			compress_pb ();
 
-			clock_begin = clock ();
-			expand ();
-			clock_end = clock ();
+			if (opt_verb) puts (" DONE\n");
 
-			if (size_out != size_in)
-				error (1, 0, "length mismatch");
+			if (opt_sym)
+				{
+				//sym_sort ();
+				sym_list ();
+				}
 
-			if (memcmp (frame_in, frame_out, size_out))
-				error (1, 0, "frame mismatch");
+			if (opt_verb)
+				{
+				puts ("FINAL");
+				printf ("frame length=%u\n", size_out);
 
-			printf ("elapsed=%lu usecs\n\n", (clock_end - clock_begin));
+				double ratio = (double) size_out / size_in;
+				printf ("ratio=%f\n\n", ratio);
+				}
+
+			out_frame (argv [optind + 1]);
+			break;
+			}
+
+		if (opt_expand)
+			{
+			//expand_b ();
+			expand_pb ();
+
+			out_frame (argv [optind + 1]);
+			break;
 			}
 
 		break;
 		}
 
-	if (f) fclose (f);
+	clock_t clock_end = clock ();
+	if (opt_verb) printf ("elapsed=%lu msecs\n\n", (clock_end - clock_begin) / 1000);
 
 	return 0;
 	}
