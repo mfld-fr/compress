@@ -1,7 +1,6 @@
 
 - quick sort on list
 
-- repeat symbol in frame
 - repeat symbol in tree
 
 - binary tree structure

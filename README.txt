@@ -22,8 +22,8 @@ DESIGN
 
 Because of small data sizes, compression is performed on the whole input
 sequence of initial symbols (= byte codes). This gives a better ratio, but
-takes more computation than the window-based algorithms (that are better
-suited for long data streams).
+requires more computation than the sliding window algorithms (the latest
+are better suited for long data streams).
 
 The compressor recursively scans the sequence to find elementary patterns as
 symbol pairs, and replaces the most frequent & asymmetric pairs by secondary
@@ -49,10 +49,13 @@ tree from the table, iterates on the sequence and recursively walks the tree.
 
 STATUS
 
-- still WIP
+Still WIP:
+- data stream implemented
 - asymmetric pairing implemented
-- internal loopback test OK
-- already good ratio on symbols
+- repeated symbol implemented (frame only)
+- external loopback test passed
+- already good ratio before recoding
+- but still bad after recoding
 
 
 See TODO.txt for next steps
