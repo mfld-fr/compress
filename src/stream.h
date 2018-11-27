@@ -37,4 +37,7 @@ uint_t in_code (uchar_t len);
 void out_prefix (uint_t val);
 uint_t in_prefix ();
 
+uchar_t log2u (uint_t val);
+
+
 //------------------------------------------------------------------------------

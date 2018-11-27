@@ -113,6 +113,8 @@ void out_pad ()
 	{
 	if (shift_out > 0)
 		{
+		// FIXME: 7 or 8 ?
+
 		byte_out >>= (7 - shift_out);
 
 		if (size_out >= FRAME_MAX)
@@ -201,6 +203,14 @@ uint_t in_prefix ()
 	uint_t val = 0;
 	if (suffix) val = base + in_code (suffix);
 	return val;
+	}
+
+
+uchar_t log2u (uint_t val)
+	{
+	uchar_t log = 1;
+	while (val >>= 1) log++;
+	return log;
 	}
 
 

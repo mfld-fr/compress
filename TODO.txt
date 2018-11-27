@@ -1,10 +1,22 @@
+TODO LIST
 
-- quick sort on list
+Needed:
+- quick sort on list ?
 
+Improvements:
+- encoding option
+- precompute definition length before serializing
+- merge table and sequence in RS
 - repeat symbol in tree
+- coding cost computation
+- self optimization based on cost
+- automatic benchmarking
 
+Huffman coding experiment:
 - binary tree structure
 - binary tree coding
 - binary tree decoding
+- adaptative tree
+- symbol coding
+- lenght and count coding ?
 
-- Huffman coding of symbol index

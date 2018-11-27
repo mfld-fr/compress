@@ -51,6 +51,8 @@ struct position_s
 	{
 	list_node_t node;  // must be the first member
 
+	uint_t base;
+
 	symbol_t * sym;
 	struct pair_s * pair;
 	};
@@ -93,6 +95,23 @@ typedef struct index_sym_s index_sym_t;
 static index_sym_t index_sym [SYMBOL_MAX];
 
 
+// Element definition
+// Used for decompression
+
+struct elem_s
+	{
+	uint_t base;
+	uint_t size;
+	};
+
+typedef struct elem_s elem_t;
+
+static elem_t elements [SYMBOL_MAX];
+
+static uint_t patterns [FRAME_MAX];
+static uint_t patt_len;
+
+
 // Program options
 
 uchar_t opt_sym;
@@ -126,6 +145,7 @@ static symbol_t * sym_add ()
 
 
 // Build index and sort
+// TODO: build key in callback
 
 static uint_t sym_sort (uint_t filter)
 	{
@@ -142,12 +162,23 @@ static uint_t sym_sort (uint_t filter)
 		switch (filter)
 			{
 			case SORT_ALL:
-				index->key = count;
+				index->key = count + ((sym->rep > 1) ? sym->rep : 0);
 				filt_count++;
 				break;
 
 			case SORT_REP:
 				if (sym->rep)
+					{
+					index->key = 0;
+					break;
+					}
+
+				index->key = count;
+				filt_count++;
+				break;
+
+			case SORT_DUP:
+				if (sym->size == 1 || (count == 1 && sym->rep != 1))
 					{
 					index->key = 0;
 					break;
@@ -195,18 +226,22 @@ static void sym_list ()
 		double p = (double) sym_dup / (pos_count + sym_count);
 		entropy += -p * log2 (p);
 
-		printf ("[%u] base=%u ", i, sym->base);
+		printf ("[%u] base=%x", i, sym->base);
 
 		if (sym->size == 1)
-			printf ("code=%hu", sym->code);
+			printf (" code=%hx", sym->code);
 		else
-			printf ("size=%u", sym->size);
+			printf (" size=%u", sym->size);
 
-		printf (" pos=%u sym=%u\n", sym->pos_count, sym->sym_count);
+		if (sym->rep > 1)
+			printf (" rep=%u", sym->rep);
+		else
+			printf (" pos=%u", sym->pos_count);
+
+		printf (" sym=%u\n", sym->sym_count);
 		}
 
-	printf ("\nsymbol count=%u\n", sym_count);
-	printf ("entropy=%f\n\n", entropy);
+	printf ("\nentropy=%f\n\n", entropy);
 	}
 
 
@@ -240,6 +275,7 @@ static void scan_base ()
 		position_t * pos = malloc (sizeof (position_t));
 		list_add_tail (&pos_root, (list_node_t *) pos);  // node as first member
 
+		pos->base = i;
 		pos->sym = sym;
 		pos->pair = NULL;
 
@@ -363,7 +399,7 @@ static int crunch_pair (pair_t * pair)
 				{
 				sym = sym_add ();
 
-				sym->base = sym_left->base;
+				sym->base = pos->base;
 				sym->size = sym_left->size + sym_right->size;
 
 				sym->left = sym_left;
@@ -482,7 +518,9 @@ static void crunch_rep ()
 				sym_left->pos_count--;
 
 				sym_rep->rep = 1;
-				sym_rep->base = sym_left->base;
+				sym_left->rep = 1;  // repeated
+
+				sym_rep->base = pos_left->base;
 				sym_rep->size = sym_left->size;
 
 				sym_rep->left = sym_left;
@@ -491,7 +529,6 @@ static void crunch_rep ()
 
 			sym_left->pos_count--;
 
-			sym_rep->size += sym_left->size;
 			sym_rep->rep++;
 
 			dec_pair (pos_right->pair);
@@ -513,6 +550,10 @@ static void crunch_rep ()
 	}
 
 
+//------------------------------------------------------------------------------
+// Algorithms
+//------------------------------------------------------------------------------
+
 // Compression with "base" (no compression)
 // Just for testing
 
@@ -525,6 +566,7 @@ static void compress_b ()
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 		out_byte (sym->code);
+
 		node = node->next;
 		}
 	}
@@ -539,7 +581,7 @@ static void expand_b ()
 	{
 	for (uint_t i = 0; i < size_in; i++)
 		{
-		out_byte (frame_in [i]);
+		out_byte (in_byte ());
 		}
 	}
 */
@@ -570,6 +612,7 @@ static void compress_pb ()
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 		out_prefix (sym->index);
+
 		node = node->next;
 		}
 
@@ -612,6 +655,7 @@ static void expand_pb ()
 // Compression with "repeated prefixed base"
 // Just for testing
 
+/*
 static void compress_rpb ()
 	{
 	crunch_rep ();
@@ -642,6 +686,8 @@ static void compress_rpb ()
 			sym = sym->left;
 			}
 
+        // TODO: use single bit to trigger repeat - start from 2
+
 		out_prefix (rep - 1);
 		out_prefix (sym->index);
 
@@ -650,11 +696,13 @@ static void compress_rpb ()
 
 	out_pad ();
 	}
+*/
 
 
 // Decompression with "repeated prefixed base"
 // Just for testing
 
+/*
 static void expand_rpb ()
 	{
 	list_init (&sym_root);
@@ -673,6 +721,8 @@ static void expand_rpb ()
 
 	for (uint_t p = 0; p < count; p++)
 		{
+        // TODO: use single bit to trigger repeat - start from 2
+
 		uint_t rep = 1 + in_prefix ();
 		uint_t i = in_prefix ();
 		index_sym_t * index = index_sym + i;
@@ -681,19 +731,226 @@ static void expand_rpb ()
 		while (rep--) out_byte (sym->code);
 		}
 	}
+*/
 
 
-// Compression with "prefixed symbol repeated base"
-/*
-static void compress_psrb ()
+// Compression with "repeated symbol"
+
+static uint_t walk_sym_len (symbol_t * sym, uint_t len);
+static void walk_sym_def (symbol_t * sym, uchar_t len);
+static void walk_sym_pos (symbol_t * sym, uchar_t len);
+
+// TODO: remove duplicates
+
+static uint_t walk_child_len (symbol_t * sym, uint_t len)
+	{
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
+		{
+		len = walk_sym_len (sym, len);
+		}
+	else
+		{
+		len++;
+		}
+
+	return len;
+	}
+
+
+static void walk_child_def (symbol_t * sym, uchar_t len)
+	{
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
+		{
+		walk_sym_def (sym, len);
+		}
+	else
+		{
+		out_bit (1);  // index
+		out_code (sym->index, len);
+		}
+	}
+
+
+static void walk_child_pos (symbol_t * sym, uchar_t len)
+	{
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
+		{
+		walk_sym_pos (sym, len);
+		}
+	else
+		{
+		out_bit (1);  // index
+		out_code (sym->index, len);
+		}
+	}
+
+
+static uint_t walk_sym_len (symbol_t * sym, uint_t len)
+	{
+	if (sym->size == 1)
+		{
+		len++;
+		}
+	else
+		{
+		len = walk_child_len (sym->left, len);
+		len = walk_child_len (sym->right, len);
+		}
+
+	return len;
+	}
+
+
+static void walk_sym_def (symbol_t * sym, uchar_t len)
+	{
+	if (sym->size == 1)
+		{
+		out_bit (0);  // code
+		out_code (sym->code, 8);
+		}
+	else
+		{
+		walk_child_def (sym->left, len);
+		walk_child_def (sym->right, len);
+		}
+	}
+
+
+static void walk_sym_pos (symbol_t * sym, uchar_t len)
+	{
+	if (sym->size == 1)
+		{
+		out_bit (0);  // code
+		out_code (sym->code, 8);
+		}
+	else
+		{
+		walk_child_pos (sym->left, len);
+		walk_child_pos (sym->right, len);
+		}
+	}
+
+
+static void compress_rs ()
 	{
 	crunch_word ();
 	crunch_rep ();
 
 	uint_t count = sym_sort (SORT_DUP);
-	}
-*/
+	uchar_t len = log2u (count);
 
+	out_prefix (count - 1);
+
+	for (uint_t i = 0; i < count; i++)
+		{
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
+
+		out_prefix (walk_sym_len (sym, 0) - 2);
+		walk_sym_def (sym, len);
+		}
+
+	out_prefix (pos_count - 1);
+
+	list_node_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+
+		uint_t rep = 1;
+		if (sym->rep > 1)
+			{
+			rep = sym->rep;
+			sym = sym->left;
+
+            // TODO: use code, repeat and insert symbols
+
+			out_bit (1);   // repeat
+			out_prefix (rep - 2);
+			}
+		else
+			{
+			out_bit (0);  // no repeat
+			}
+
+		walk_child_pos (sym, len);
+
+		node = node->next;
+		}
+
+	out_pad ();
+	}
+
+
+// Decompression with "repeated symbol"
+
+static void walk_elem (uint_t i)
+	{
+	elem_t * elem  = elements + i;
+	uint_t base = elem->base;
+
+	for (uint i = 0; i < elem->size; i++)
+		{
+		uint_t patt = patterns [base++];
+		if (patt & 32768)
+			walk_elem (patt & 32767);
+		else
+			out_byte (patt);
+
+		}
+	}
+
+
+static void expand_rs ()
+	{
+	uint_t count = 1 + in_prefix ();
+	uchar_t len = log2u (count);
+
+	for (uint_t i = 0; i < count; i++)
+		{
+		elem_t * elem = elements + i;
+
+		uint_t size = 2 + in_prefix ();
+
+		elem->size = size;
+		elem->base = patt_len;
+
+		for (uint_t j = 0; j < size; j++)
+			{
+			if (in_bit ())  // index
+				patterns [patt_len++] = 32768 | in_code (len);
+			else
+				patterns [patt_len++] = in_code (8);
+
+			}
+		}
+
+	count = 1 + in_prefix ();
+
+	for (uint_t p = 0; p < count; p++)
+		{
+		uint_t rep = 1;
+		if (in_bit ()) // repeat
+			rep = 2 + in_prefix ();
+
+		if (in_bit ())  // index
+			{
+			uint_t i = in_code (len);
+			while (rep--) walk_elem (i);
+			}
+		else
+			{
+			uchar_t code = in_code (8);
+			while (rep--) out_byte (code);
+			}
+		}
+	}
+
+
+//------------------------------------------------------------------------------
+// Main entry point
+//------------------------------------------------------------------------------
 
 int main (int argc, char * argv [])
 	{
@@ -736,6 +993,7 @@ int main (int argc, char * argv [])
 			puts ("  -e  expand");
 			puts ("  -s  list symbols");
 			puts ("  -v  verbose");
+			puts ("");
 			break;
 			}
 
@@ -743,16 +1001,17 @@ int main (int argc, char * argv [])
 
 		if (opt_compress)
 			{
-			if (opt_verb)
-				{
-				puts ("INITIAL");
-				printf ("frame length=%u\n\n", size_in);
-				}
-
 			if (size_in < 3)
 				error (1, 0, "frame too short");
 
 			scan_base ();
+
+			if (opt_verb)
+				{
+				puts ("INITIAL");
+				printf ("frame length=%u\n", size_in);
+				printf ("symbol count=%u\n\n", sym_count);
+				}
 
 			if (opt_sym)
 				{
@@ -768,8 +1027,8 @@ int main (int argc, char * argv [])
 
 			//compress_b ();
 			//compress_pb ();
-			compress_rpb ();
-			//compress_psrb ();
+			//compress_rpb ();
+			compress_rs ();
 
 			if (opt_verb) puts (" DONE\n");
 
@@ -783,6 +1042,7 @@ int main (int argc, char * argv [])
 				{
 				puts ("FINAL");
 				printf ("frame size=%u\n", pos_count);
+				printf ("symbol count=%u\n", sym_count);
 				printf ("frame length=%u\n", size_out);
 
 				double ratio = (double) size_out / size_in;
@@ -799,7 +1059,8 @@ int main (int argc, char * argv [])
 
 			//expand_b ();
 			//expand_pb ();
-			expand_rpb ();
+			//expand_rpb ();
+			expand_rs ();
 
 			if (opt_verb) puts (" DONE\n");
 
@@ -815,3 +1076,6 @@ int main (int argc, char * argv [])
 
 	return 0;
 	}
+
+
+//------------------------------------------------------------------------------
