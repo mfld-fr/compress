@@ -113,8 +113,6 @@ void out_pad ()
 	{
 	if (shift_out > 0)
 		{
-		// FIXME: 7 or 8 ?
-
 		byte_out >>= (7 - shift_out);
 
 		if (size_out >= FRAME_MAX)
@@ -168,7 +166,23 @@ uint_t in_code (uchar_t len)
 
 // Prefixed code
 
-void out_prefix (uint_t val)
+void out_len (uchar_t len)
+	{
+	while (len-- > 0) out_bit (1);
+	out_bit (0);
+	}
+
+uchar_t in_len ()
+	{
+	uchar_t len = 0;
+
+	while (in_bit ()) len++;
+
+	return len;
+	}
+
+
+void out_pref_odd (uint_t val)
 	{
 	uchar_t prefix = 0;
 	uint_t base0 = 0;
@@ -181,15 +195,13 @@ void out_prefix (uint_t val)
 		prefix++;
 		}
 
-	uint_t suffix = prefix;
-	while (prefix-- > 0) out_bit (1);
-	out_bit (0);
+	out_len (prefix);
 
-	if (suffix) out_code (val - base0, suffix);
+	if (prefix) out_code (val - base0, prefix);
 	}
 
 
-uint_t in_prefix ()
+uint_t in_pref_odd ()
 	{
 	uchar_t suffix = 0;
 	uint_t base = 0;
@@ -203,6 +215,40 @@ uint_t in_prefix ()
 	uint_t val = 0;
 	if (suffix) val = base + in_code (suffix);
 	return val;
+	}
+
+
+void out_pref_even (uint_t val)
+	{
+	uchar_t prefix = 0;
+	uint_t base0 = 0;
+	uint_t base1 = 2;
+
+	while (val >= base1)
+		{
+		base0 = base1;
+		base1 = (base1 << 1) | 2;
+		prefix++;
+		}
+
+	out_len (prefix);
+
+	out_code (val - base0, 1 + prefix);
+	}
+
+
+uint_t in_pref_even ()
+	{
+	uchar_t suffix = 0;
+	uint_t base = 0;
+
+	while (in_bit ())
+		{
+		suffix++;
+		base = (base << 1) | 2;
+		}
+
+	return  (base + in_code (1 + suffix));
 	}
 
 

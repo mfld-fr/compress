@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <memory.h>
+#include <string.h>
 #include <time.h>
 #include <error.h>
 #include <math.h>
@@ -114,9 +115,18 @@ static uint_t patt_len;
 
 // Program options
 
-uchar_t opt_sym;
+#define ALGO_DEF 0
+#define ALGO_BASE 1
+#define ALGO_REP_BASE 2
+#define ALGO_PREF 3
+#define ALGO_REP_PREF 4
+#define ALGO_SYM 5
+#define ALGO_REP_SYM 6
+
+uchar_t opt_algo;
 uchar_t opt_compress;
 uchar_t opt_expand;
+uchar_t opt_sym;
 uchar_t opt_verb;
 
 
@@ -557,7 +567,6 @@ static void crunch_rep ()
 // Compression with "base" (no compression)
 // Just for testing
 
-/*
 static void compress_b ()
 	{
 	list_node_t * node = pos_root.next;
@@ -570,13 +579,11 @@ static void compress_b ()
 		node = node->next;
 		}
 	}
-*/
 
 
 // Decompression with "base" (no decompression)
 // Just for testing
 
-/*
 static void expand_b ()
 	{
 	for (uint_t i = 0; i < size_in; i++)
@@ -584,52 +591,80 @@ static void expand_b ()
 		out_byte (in_byte ());
 		}
 	}
-*/
+
+
+// Compression with "repeated base"
+
+static void compress_rb ()
+	{
+	error (1, 0, "not implemented");
+	}
+
+
+// Decompression with "repeated base"
+
+static void expand_rb ()
+	{
+	error (1, 0, "not implemented");
+	}
 
 
 // Compression with "prefixed base"
 // Just for testing
 
-/*
 static void compress_pb ()
 	{
 	if (!opt_sym) sym_sort (SORT_ALL);
 
-	out_prefix (sym_count - 1);
+	// No more than 6 prefixed bits for space gain
 
-	for (uint_t i = 0; i < sym_count; i++)
+	uint_t max = (sym_count < 14) ? sym_count : 14;
+
+	out_pref_odd (max - 1);
+
+	for (uint_t i = 0; i < max; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 		out_code (sym->code, 8);
 		}
 
-	out_prefix (pos_count - 1);
+	out_pref_odd (pos_count - 1);
 
 	list_node_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
-		out_prefix (sym->index);
+
+		// Use index only when space gain
+
+		if (sym->index < max)
+			{
+			out_bit (1);  // index flag
+			out_pref_even (sym->index);
+			}
+		else
+			{
+			out_bit (0);  // code flag
+			out_code (sym->code, 8);
+			}
 
 		node = node->next;
 		}
 
 	out_pad ();
 	}
-*/
 
 
 // Decompression with "prefixed base"
 // Just for testing
 
-/*
 static void expand_pb ()
 	{
 	list_init (&sym_root);
 
-	uint_t count = 1 + in_prefix ();
+	uint_t count = 1 + in_pref_odd ();
 
 	for (uint_t i = 0; i < count; i++)
 		{
@@ -639,30 +674,35 @@ static void expand_pb ()
 		index->sym = sym;
 		}
 
-	count = 1 + in_prefix ();
+	count = 1 + in_pref_odd ();
 
 	for (uint_t p = 0; p < count; p++)
 		{
-		uint_t i = in_prefix ();
-		index_sym_t * index = index_sym + i;
-		symbol_t * sym = index->sym;
-		out_byte (sym->code);
+		if (in_bit ())  // index flag
+			{
+			uint_t i = in_pref_even ();
+			index_sym_t * index = index_sym + i;
+			symbol_t * sym = index->sym;
+			out_byte (sym->code);
+			}
+		else
+			{
+			out_byte (in_code (8));
+			}
 		}
 	}
-*/
 
 
 // Compression with "repeated prefixed base"
 // Just for testing
 
-/*
 static void compress_rpb ()
 	{
 	crunch_rep ();
 
 	uint_t count = sym_sort (SORT_REP);
 
-	out_prefix (count - 1);
+	out_pref_odd (count - 1);
 
 	for (uint_t i = 0; i < count; i++)
 		{
@@ -671,7 +711,7 @@ static void compress_rpb ()
 		if (!sym->rep) out_code (sym->code, 8);
 		}
 
-	out_prefix (pos_count - 1);
+	out_pref_odd (pos_count - 1);
 
 	list_node_t * node = pos_root.next;
 	while (node != &pos_root)
@@ -688,26 +728,24 @@ static void compress_rpb ()
 
         // TODO: use single bit to trigger repeat - start from 2
 
-		out_prefix (rep - 1);
-		out_prefix (sym->index);
+		out_pref_odd (rep - 1);
+		out_pref_odd (sym->index);
 
 		node = node->next;
 		}
 
 	out_pad ();
 	}
-*/
 
 
 // Decompression with "repeated prefixed base"
 // Just for testing
 
-/*
 static void expand_rpb ()
 	{
 	list_init (&sym_root);
 
-	uint_t count = 1 + in_prefix ();
+	uint_t count = 1 + in_pref_odd ();
 
 	for (uint_t i = 0; i < count; i++)
 		{
@@ -717,21 +755,36 @@ static void expand_rpb ()
 		index->sym = sym;
 		}
 
-	count = 1 + in_prefix ();
+	count = 1 + in_pref_odd ();
 
 	for (uint_t p = 0; p < count; p++)
 		{
         // TODO: use single bit to trigger repeat - start from 2
 
-		uint_t rep = 1 + in_prefix ();
-		uint_t i = in_prefix ();
+		uint_t rep = 1 + in_pref_odd ();
+		uint_t i = in_pref_odd ();
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 
 		while (rep--) out_byte (sym->code);
 		}
 	}
-*/
+
+
+// Compression with "symbol"
+
+static void compress_s ()
+	{
+	error (1, 0, "not implemented");
+	}
+
+
+// Decompression with "symbol"
+
+static void expand_s ()
+	{
+	error (1, 0, "not implemented");
+	}
 
 
 // Compression with "repeated symbol"
@@ -839,18 +892,18 @@ static void compress_rs ()
 	uint_t count = sym_sort (SORT_DUP);
 	uchar_t len = log2u (count);
 
-	out_prefix (count - 1);
+	out_pref_odd (count - 1);
 
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 
-		out_prefix (walk_sym_len (sym, 0) - 2);
+		out_pref_odd (walk_sym_len (sym, 0) - 2);
 		walk_sym_def (sym, len);
 		}
 
-	out_prefix (pos_count - 1);
+	out_pref_odd (pos_count - 1);
 
 	list_node_t * node = pos_root.next;
 	while (node != &pos_root)
@@ -867,7 +920,7 @@ static void compress_rs ()
             // TODO: use code, repeat and insert symbols
 
 			out_bit (1);   // repeat
-			out_prefix (rep - 2);
+			out_pref_odd (rep - 2);
 			}
 		else
 			{
@@ -904,14 +957,14 @@ static void walk_elem (uint_t i)
 
 static void expand_rs ()
 	{
-	uint_t count = 1 + in_prefix ();
+	uint_t count = 1 + in_pref_odd ();
 	uchar_t len = log2u (count);
 
 	for (uint_t i = 0; i < count; i++)
 		{
 		elem_t * elem = elements + i;
 
-		uint_t size = 2 + in_prefix ();
+		uint_t size = 2 + in_pref_odd ();
 
 		elem->size = size;
 		elem->base = patt_len;
@@ -926,13 +979,13 @@ static void expand_rs ()
 			}
 		}
 
-	count = 1 + in_prefix ();
+	count = 1 + in_pref_odd ();
 
 	for (uint_t p = 0; p < count; p++)
 		{
 		uint_t rep = 1;
 		if (in_bit ()) // repeat
-			rep = 2 + in_prefix ();
+			rep = 2 + in_pref_odd ();
 
 		if (in_bit ())  // index
 			{
@@ -962,7 +1015,7 @@ int main (int argc, char * argv [])
 
 		while (1)
 			{
-			opt = getopt (argc, argv, "cesv");
+			opt = getopt (argc, argv, "cdm:sv");
 			if (opt < 0 || opt == '?') break;
 
 			switch (opt)
@@ -971,8 +1024,26 @@ int main (int argc, char * argv [])
 					opt_compress = 1;
 					break;
 
-				case 'e':  // expand
+				case 'd':  // expand
 					opt_expand = 1;
+					break;
+
+				case 'm':  // algorithm
+					if (!strcmp (optarg, "b"))
+						opt_algo = ALGO_BASE;
+					else if (!strcmp (optarg, "rb"))
+						opt_algo = ALGO_REP_BASE;
+					else if (!strcmp (optarg, "pb"))
+						opt_algo = ALGO_PREF;
+					else if (!strcmp (optarg, "rp"))
+						opt_algo = ALGO_REP_PREF;
+					else if (!strcmp (optarg, "s"))
+						opt_algo = ALGO_SYM;
+					else if (!strcmp (optarg, "rs"))
+						opt_algo = ALGO_REP_SYM;
+					else
+						error (1, 0, "unknown algorithm");
+
 					break;
 
 				case 's':  // list symbols
@@ -988,11 +1059,20 @@ int main (int argc, char * argv [])
 
 		if (opt == '?' || optind != argc - 2 || (opt_compress == opt_expand))
 			{
-			printf ("usage: %s (-c | -e) [-sv] [input file] [output file]\n\n", argv [0]);
+			printf ("usage: %s (-c | -d) [-sv] [-m <algo>] <input file> <output file>\n\n", argv [0]);
 			puts ("  -c  compress");
-			puts ("  -e  expand");
+			puts ("  -d  expand");
+			puts ("  -m  algorithm");
 			puts ("  -s  list symbols");
 			puts ("  -v  verbose");
+			puts ("");
+			puts ("algorithms:");
+			puts ("  b    base (no compression)");
+			puts ("  rb   repeat base");
+			puts ("  pb   prefixed base");
+			puts ("  rpb  repeat prefixed base");
+			puts ("  s    symbol");
+			puts ("  rs   repeat symbol (default)");
 			puts ("");
 			break;
 			}
@@ -1021,14 +1101,37 @@ int main (int argc, char * argv [])
 
 			if (opt_verb) printf ("Compressing...");
 
-			/*
-			shrink_frame ();
-			*/
+			switch (opt_algo)
+				{
+				case ALGO_BASE:
+					compress_b ();
+					break;
 
-			//compress_b ();
-			//compress_pb ();
-			//compress_rpb ();
-			compress_rs ();
+				case ALGO_REP_BASE:
+					compress_rb ();
+					break;
+
+				case ALGO_PREF:
+					compress_pb ();
+					break;
+
+				case ALGO_REP_PREF:
+					compress_rpb ();
+					break;
+
+				case ALGO_SYM:
+					compress_s ();
+					break;
+
+				case ALGO_REP_SYM:
+					compress_rs ();
+					break;
+
+				default:
+					compress_rs ();
+					break;
+
+				}
 
 			if (opt_verb) puts (" DONE\n");
 
@@ -1057,10 +1160,37 @@ int main (int argc, char * argv [])
 			{
 			if (opt_verb) printf ("Expanding...");
 
-			//expand_b ();
-			//expand_pb ();
-			//expand_rpb ();
-			expand_rs ();
+			switch (opt_algo)
+				{
+				case ALGO_BASE:
+					expand_b ();
+					break;
+
+				case ALGO_REP_BASE:
+					expand_rb ();
+					break;
+
+				case ALGO_PREF:
+					expand_pb ();
+					break;
+
+				case ALGO_REP_PREF:
+					expand_rpb ();
+					break;
+
+				case ALGO_SYM:
+					expand_s ();
+					break;
+
+				case ALGO_REP_SYM:
+					expand_rs ();
+					break;
+
+				default:
+					expand_rs ();
+					break;
+
+				}
 
 			if (opt_verb) puts (" DONE\n");
 
@@ -1072,7 +1202,7 @@ int main (int argc, char * argv [])
 		}
 
 	clock_t clock_end = clock ();
-	if (opt_verb) printf ("elapsed=%lu msecs\n\n", (clock_end - clock_begin) / 1000);
+	if (opt_verb) printf ("elapsed=%lu usecs\n\n", clock_end - clock_begin);
 
 	return 0;
 	}

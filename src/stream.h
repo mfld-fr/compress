@@ -34,8 +34,14 @@ void out_pad ();
 void out_code (uint_t code, uchar_t len);
 uint_t in_code (uchar_t len);
 
-void out_prefix (uint_t val);
-uint_t in_prefix ();
+void out_len (uchar_t val);
+uchar_t in_len ();
+
+void out_pref_odd (uint_t val);
+uint_t in_pref_odd ();
+
+void out_pref_even (uint_t val);
+uint_t in_pref_even ();
 
 uchar_t log2u (uint_t val);
 

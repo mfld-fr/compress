@@ -1,13 +1,13 @@
-if [ $# -ne 1 ]; then
-	echo "Missing input file !"
+if [ $# -ne 2 ]; then
+	echo "Missing input file and algorithm !"
 	exit 1
 	fi
 
 echo "Compressing..."
-Release/compress -scv $1 test_out.bin > test.txt
+Release/compress -scv $1 -m $2 test_out.bin > test.txt
 
 echo "Expanding..."
-Release/compress -ev test_out.bin test_in.bin >> test.txt
+Release/compress -dv -m $2 test_out.bin test_in.bin >> test.txt
 
 echo "Comparing..."
 dump $1 > $1.txt

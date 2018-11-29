@@ -1,4 +1,6 @@
-/* Double-linked list */
+//------------------------------------------------------------------------------
+// Double-linked list
+//------------------------------------------------------------------------------
 
 #pragma once
 
@@ -21,3 +23,6 @@ void list_add_tail (list_node_t * root, list_node_t * node);
 void list_add_head (list_node_t * root, list_node_t * node);
 
 void list_remove (list_node_t * node);
+
+
+//------------------------------------------------------------------------------
