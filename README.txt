@@ -81,10 +81,10 @@ Compression ratio:
 ENCODING     DATA  CODE   ASH
 
 Initial      6151  43584  51216
-B(ase)       6151  43584  51216
-R(epeat)B    x     x      x
-P(refix)     4840  41659  48955
-RP           x     x      x
+B(ase)       6151  43584  51216   Just for testing
+R(epeat)B    5650  48716  55948   Not efficient - discarded
+P(refix)B    4840  41659  48955   Good balance
+RPB          4752  43472  50479   Less efficient - discarded
 S(ymbol)     x     x      x
 RS           3875  35903  41736
 RPS          x     x      x
@@ -98,12 +98,12 @@ Compression time for ASH (ms):
 
 ENCODING    COMPRESS  EXPAND
 
-B(ase)      x         x
-R(epeat)B   x         x
-P(refix)    8         4
-RP          x         x
+B(ase)      6         2
+R(epeat)B   -         -
+P(refix)B   8         4
+RPB         -         -
 S(ymbol)    x         x
-RS          5602      4
+RS          5600      4
 RPS         x         x
 
 gzip -1     4         2

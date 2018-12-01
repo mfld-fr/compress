@@ -4,10 +4,10 @@ if [ $# -ne 2 ]; then
 	fi
 
 echo "Compressing..."
-Release/compress -scv $1 -m $2 test_out.bin > test.txt
+Release/compress -cvs $1 -m $2 test_out.bin > test.txt
 
 echo "Expanding..."
-Release/compress -dv -m $2 test_out.bin test_in.bin >> test.txt
+Release/compress -ev -m $2 test_out.bin test_in.bin >> test.txt
 
 echo "Comparing..."
 dump $1 > $1.txt

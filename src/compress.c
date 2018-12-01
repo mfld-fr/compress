@@ -20,7 +20,7 @@
 
 struct symbol_s
 	{
-	list_node_t node;  // must be the first member
+	list_t node;  // must be the first member
 
 	uint_t pos_count;  // number of occurrences in the frame
 	uint_t sym_count;  // number of occurrences in the tree
@@ -40,7 +40,7 @@ struct symbol_s
 
 typedef struct symbol_s symbol_t;
 
-static list_node_t sym_root;
+static list_t sym_root;
 static uint_t sym_count;
 
 
@@ -50,7 +50,7 @@ struct pair_s;
 
 struct position_s
 	{
-	list_node_t node;  // must be the first member
+	list_t node;  // must be the first member
 
 	uint_t base;
 
@@ -60,13 +60,13 @@ struct position_s
 
 typedef struct position_s position_t;
 
-static list_node_t pos_root;
+static list_t pos_root;
 static uint_t pos_count;
 
 
 struct pair_s
 	{
-	list_node_t node;  // must be the first member
+	list_t node;  // must be the first member
 
 	uint_t count;  // number of occurrences in the frame
 
@@ -76,7 +76,7 @@ struct pair_s
 
 typedef struct pair_s pair_t;
 
-static list_node_t pair_root;
+static list_t pair_root;
 
 
 // Indexes for quick sort
@@ -147,7 +147,7 @@ static symbol_t * sym_add ()
 	symbol_t * sym = malloc (sizeof (symbol_t));
 	memset (sym, 0, sizeof (symbol_t));
 
-	list_add_tail (&sym_root, (list_node_t *) sym);  // node as first member
+	list_add_tail (&sym_root, (list_t *) sym);  // node as first member
 	sym_count++;
 
 	return sym;
@@ -161,7 +161,7 @@ static uint_t sym_sort (uint_t filter)
 	{
 	uint_t filt_count = 0;
 
-	list_node_t * node = sym_root.next;
+	list_t * node = sym_root.next;
 	for (uint_t i = 0; i < sym_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
@@ -177,7 +177,7 @@ static uint_t sym_sort (uint_t filter)
 				break;
 
 			case SORT_REP:
-				if (sym->rep)
+				if (sym->rep > 1)
 					{
 					index->key = 0;
 					break;
@@ -225,6 +225,8 @@ static uint_t sym_sort (uint_t filter)
 static void sym_list ()
 	{
 	double entropy = 0.0;
+
+	puts ("SYMBOLS");
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
@@ -283,7 +285,7 @@ static void scan_base ()
 			}
 
 		position_t * pos = malloc (sizeof (position_t));
-		list_add_tail (&pos_root, (list_node_t *) pos);  // node as first member
+		list_add_tail (&pos_root, (list_t *) pos);  // node as first member
 
 		pos->base = i;
 		pos->sym = sym;
@@ -298,12 +300,15 @@ static void scan_base ()
 
 // Scan frame for new pairs
 
+// TODO: optimize the pair scan with a sublist
+// initialized by scan_base and updated by crunch_pair
+
 static void scan_pair ()
 	{
-	list_node_t * node_left = pos_root.next;
+	list_t * node_left = pos_root.next;
 	while ((node_left != pos_root.prev) && (node_left != &pos_root))
 		{
-		list_node_t * node_left_next = node_left->next;
+		list_t * node_left_next = node_left->next;
 
 		position_t * pos_left = (position_t *) node_left;  // node as first member
 		if (!pos_left->pair)  // skip already found pair
@@ -311,7 +316,7 @@ static void scan_pair ()
 			// Add new pair
 
 			pair_t * pair = malloc (sizeof (pair_t));
-			list_add_tail (&pair_root, (list_node_t *) pair);  // node as first member
+			list_add_tail (&pair_root, (list_t *) pair);  // node as first member
 
 			pair->count = 1;
 
@@ -322,10 +327,10 @@ static void scan_pair ()
 
 			// Scan for pair duplicates
 
-			list_node_t * node_right = node_left->next;
+			list_t * node_right = node_left->next;
 			while ((node_right != pos_root.prev) && (node_right != &pos_root))
 				{
-				list_node_t * node_right_next = node_right->next;
+				list_t * node_right_next = node_right->next;
 
 				position_t * pos_right = (position_t *) node_right;  // node as first member
 
@@ -355,7 +360,7 @@ static void dec_pair (pair_t * pair)
 
 		if (!pair->count)
 			{
-			list_remove ((list_node_t *) pair);  // node as first member
+			list_remove ((list_t *) pair);  // node as first member
 			free (pair);
 			}
 		}
@@ -372,12 +377,12 @@ static int crunch_pair (pair_t * pair)
 
 	symbol_t * sym = NULL;
 
-	list_node_t * node = pos_root.next;
-	list_node_t * node_prev = &pos_root;
+	list_t * node = pos_root.next;
+	list_t * node_prev = &pos_root;
 
 	while ((node != pos_root.prev) && (node != &pos_root))
 		{
-		list_node_t * node_next = node->next;
+		list_t * node_next = node->next;
 
 		position_t * pos = (position_t *) node;  // node as first member
 		if (pos->pair == pair)
@@ -430,7 +435,7 @@ static int crunch_pair (pair_t * pair)
 
 			// Shift frame end to left
 
-			list_node_t * node_after = node_next->next;
+			list_t * node_after = node_next->next;
 			list_remove (node_next);
 			free ((position_t *) node_next);  // node as first member
 			node_next = node_after;
@@ -466,7 +471,7 @@ static void crunch_word ()
 		uint_t count_max = 0;
 		pair_t * pair_max = NULL;
 
-		list_node_t * node = pair_root.next;
+		list_t * node = pair_root.next;
 		while (node != &pair_root)
 			{
 			pair_t * pair = (pair_t *) node;  // node as first member
@@ -498,7 +503,7 @@ static void crunch_word ()
 
 static void crunch_rep ()
 	{
-	list_node_t * node_left = pos_root.next;
+	list_t * node_left = pos_root.next;
 	while ((node_left != pos_root.prev) && (node_left != &pos_root))
 		{
 		position_t * pos_left = (position_t *) node_left;  // node as first member
@@ -506,7 +511,7 @@ static void crunch_rep ()
 		symbol_t * sym_left = pos_left->sym;
 		symbol_t * sym_rep = NULL;
 
-		list_node_t * node_right = node_left->next;
+		list_t * node_right = node_left->next;
 		while (1)
 			{
 			if (node_right == &pos_root) break;
@@ -547,7 +552,7 @@ static void crunch_rep ()
 
 			// Shift frame end to left
 
-			list_node_t * node_after = node_right->next;
+			list_t * node_after = node_right->next;
 			list_remove (node_right);
 			free ((position_t *) node_right);  // node as first member
 			node_right = node_after;
@@ -569,7 +574,7 @@ static void crunch_rep ()
 
 static void compress_b ()
 	{
-	list_node_t * node = pos_root.next;
+	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
@@ -594,18 +599,62 @@ static void expand_b ()
 
 
 // Compression with "repeated base"
+// Just for testing
 
 static void compress_rb ()
 	{
-	error (1, 0, "not implemented");
+	crunch_rep ();
+
+	out_pref_odd (pos_count - 1);
+
+	list_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+
+		if (sym->rep > 1)
+			{
+			out_bit (1);  // repeat flag
+
+			out_pref_odd (sym->rep - 2);
+
+			sym = sym->left;
+			}
+		else
+			{
+			out_bit (0);
+			}
+
+		out_code (sym->code, 8);
+
+		node = node->next;
+		}
+
+	out_pad ();
 	}
 
 
 // Decompression with "repeated base"
+// Just for testing
 
 static void expand_rb ()
 	{
-	error (1, 0, "not implemented");
+	uint_t count = 1 + in_pref_odd ();
+
+	for (uint_t p = 0; p < count; p++)
+		{
+		if (!in_bit ())  // code flag
+			{
+			out_byte (in_code (8));
+			}
+		else
+			{
+			uint_t rep = 2 + in_pref_odd ();
+			uchar_t code = in_code (8);
+			while (rep--) out_byte (code);
+			}
+		}
 	}
 
 
@@ -616,13 +665,14 @@ static void compress_pb ()
 	{
 	if (!opt_sym) sym_sort (SORT_ALL);
 
-	// No more than 6 prefixed bits for space gain
+	// No more than 6 prefixed bits to save space
+	// so no more than 14 indexed symbols
 
-	uint_t max = (sym_count < 14) ? sym_count : 14;
+	uint_t count = (sym_count < 14) ? sym_count : 14;
 
-	out_pref_odd (max - 1);
+	out_pref_odd (count - 1);
 
-	for (uint_t i = 0; i < max; i++)
+	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
@@ -631,7 +681,7 @@ static void compress_pb ()
 
 	out_pref_odd (pos_count - 1);
 
-	list_node_t * node = pos_root.next;
+	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
@@ -639,7 +689,7 @@ static void compress_pb ()
 
 		// Use index only when space gain
 
-		if (sym->index < max)
+		if (sym->index < count)
 			{
 			out_bit (1);  // index flag
 			out_pref_even (sym->index);
@@ -702,34 +752,54 @@ static void compress_rpb ()
 
 	uint_t count = sym_sort (SORT_REP);
 
+	// No more than 6 prefixed bits to save space
+	// so no more than 14 indexed symbols
+
+	count = (count < 14) ? count : 14;
+
 	out_pref_odd (count - 1);
 
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
-		if (!sym->rep) out_code (sym->code, 8);
+		out_code (sym->code, 8);
 		}
 
 	out_pref_odd (pos_count - 1);
 
-	list_node_t * node = pos_root.next;
+	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 
-		uint_t rep = 1;
-		if (sym->rep)
+		uchar_t rep = 0;
+
+		if (sym->rep > 1)
 			{
-			rep = sym->rep;
+			out_bit (1);  // repeat word
+			out_bit (0);
+
+			out_pref_odd (sym->rep - 2);
+
 			sym = sym->left;
+
+			rep = 1;
 			}
 
-        // TODO: use single bit to trigger repeat - start from 2
+		if (sym->index < 14)
+			{
+			out_bit (1); // index flag or word
+			if (!rep) out_bit (1);
 
-		out_pref_odd (rep - 1);
-		out_pref_odd (sym->index);
+			out_pref_even (sym->index);
+			}
+		else
+			{
+			out_bit (0);  // code flag and word
+			out_code (sym->code, 8);
+			}
 
 		node = node->next;
 		}
@@ -759,14 +829,39 @@ static void expand_rpb ()
 
 	for (uint_t p = 0; p < count; p++)
 		{
-        // TODO: use single bit to trigger repeat - start from 2
+		if (!in_bit ())  // code word
+			{
+			out_byte (in_code (8));
+			}
+		else
+			{
+			uint_t rep = 1;
 
-		uint_t rep = 1 + in_pref_odd ();
-		uint_t i = in_pref_odd ();
-		index_sym_t * index = index_sym + i;
-		symbol_t * sym = index->sym;
+			if (!in_bit ())  // repeat word
+				{
+				rep = 2 + in_pref_odd ();
 
-		while (rep--) out_byte (sym->code);
+				if (in_bit ())  // index flag
+					{
+					uint_t i = in_pref_even ();
+					index_sym_t * index = index_sym + i;
+					symbol_t * sym = index->sym;
+					while (rep--) out_byte (sym->code);
+					}
+				else
+					{
+					uchar_t code = in_code (8);
+					while (rep--) out_byte (code);
+					}
+				}
+			else
+				{
+				uint_t i = in_pref_even ();
+				index_sym_t * index = index_sym + i;
+				symbol_t * sym = index->sym;
+				out_byte (sym->code);
+				}
+			}
 		}
 	}
 
@@ -790,10 +885,8 @@ static void expand_s ()
 // Compression with "repeated symbol"
 
 static uint_t walk_sym_len (symbol_t * sym, uint_t len);
-static void walk_sym_def (symbol_t * sym, uchar_t len);
-static void walk_sym_pos (symbol_t * sym, uchar_t len);
+static void walk_sym (symbol_t * sym, uchar_t len);
 
-// TODO: remove duplicates
 
 static uint_t walk_child_len (symbol_t * sym, uint_t len)
 	{
@@ -810,25 +903,11 @@ static uint_t walk_child_len (symbol_t * sym, uint_t len)
 	}
 
 
-static void walk_child_def (symbol_t * sym, uchar_t len)
+static void walk_child (symbol_t * sym, uchar_t len)
 	{
 	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
 		{
-		walk_sym_def (sym, len);
-		}
-	else
-		{
-		out_bit (1);  // index
-		out_code (sym->index, len);
-		}
-	}
-
-
-static void walk_child_pos (symbol_t * sym, uchar_t len)
-	{
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
-		{
-		walk_sym_pos (sym, len);
+		walk_sym (sym, len);
 		}
 	else
 		{
@@ -854,7 +933,7 @@ static uint_t walk_sym_len (symbol_t * sym, uint_t len)
 	}
 
 
-static void walk_sym_def (symbol_t * sym, uchar_t len)
+static void walk_sym (symbol_t * sym, uchar_t len)
 	{
 	if (sym->size == 1)
 		{
@@ -863,23 +942,8 @@ static void walk_sym_def (symbol_t * sym, uchar_t len)
 		}
 	else
 		{
-		walk_child_def (sym->left, len);
-		walk_child_def (sym->right, len);
-		}
-	}
-
-
-static void walk_sym_pos (symbol_t * sym, uchar_t len)
-	{
-	if (sym->size == 1)
-		{
-		out_bit (0);  // code
-		out_code (sym->code, 8);
-		}
-	else
-		{
-		walk_child_pos (sym->left, len);
-		walk_child_pos (sym->right, len);
+		walk_child (sym->left, len);
+		walk_child (sym->right, len);
 		}
 	}
 
@@ -900,12 +964,12 @@ static void compress_rs ()
 		symbol_t * sym = index->sym;
 
 		out_pref_odd (walk_sym_len (sym, 0) - 2);
-		walk_sym_def (sym, len);
+		walk_sym (sym, len);
 		}
 
 	out_pref_odd (pos_count - 1);
 
-	list_node_t * node = pos_root.next;
+	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
@@ -927,7 +991,7 @@ static void compress_rs ()
 			out_bit (0);  // no repeat
 			}
 
-		walk_child_pos (sym, len);
+		walk_child (sym, len);
 
 		node = node->next;
 		}
@@ -1015,7 +1079,7 @@ int main (int argc, char * argv [])
 
 		while (1)
 			{
-			opt = getopt (argc, argv, "cdm:sv");
+			opt = getopt (argc, argv, "cem:sv");
 			if (opt < 0 || opt == '?') break;
 
 			switch (opt)
@@ -1024,7 +1088,7 @@ int main (int argc, char * argv [])
 					opt_compress = 1;
 					break;
 
-				case 'd':  // expand
+				case 'e':  // expand
 					opt_expand = 1;
 					break;
 
@@ -1035,7 +1099,7 @@ int main (int argc, char * argv [])
 						opt_algo = ALGO_REP_BASE;
 					else if (!strcmp (optarg, "pb"))
 						opt_algo = ALGO_PREF;
-					else if (!strcmp (optarg, "rp"))
+					else if (!strcmp (optarg, "rpb"))
 						opt_algo = ALGO_REP_PREF;
 					else if (!strcmp (optarg, "s"))
 						opt_algo = ALGO_SYM;
@@ -1061,7 +1125,7 @@ int main (int argc, char * argv [])
 			{
 			printf ("usage: %s (-c | -d) [-sv] [-m <algo>] <input file> <output file>\n\n", argv [0]);
 			puts ("  -c  compress");
-			puts ("  -d  expand");
+			puts ("  -e  expand");
 			puts ("  -m  algorithm");
 			puts ("  -s  list symbols");
 			puts ("  -v  verbose");

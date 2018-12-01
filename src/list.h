@@ -5,24 +5,24 @@
 #pragma once
 
 
-struct list_node_s
+struct list_s
 	{
-	struct list_node_s * prev;
-	struct list_node_s * next;
+	struct list_s * prev;
+	struct list_s * next;
 	};
 
-typedef struct list_node_s list_node_t;
+typedef struct list_s list_t;
 
 
-void list_init (list_node_t * root);
+void list_init (list_t * root);
 
-void insert_before (list_node_t * next, list_node_t * node);
-void insert_after (list_node_t * prev, list_node_t * node);
+void insert_before (list_t * next, list_t * node);
+void insert_after (list_t * prev, list_t * node);
 
-void list_add_tail (list_node_t * root, list_node_t * node);
-void list_add_head (list_node_t * root, list_node_t * node);
+void list_add_tail (list_t * root, list_t * node);
+void list_add_head (list_t * root, list_t * node);
 
-void list_remove (list_node_t * node);
+void list_remove (list_t * node);
 
 
 //------------------------------------------------------------------------------
