@@ -23,7 +23,7 @@ DESIGN
 Because of small data sizes on the target, compression is performed on the
 whole initial sequence of base symbols (= characters as byte codes). This gives
 a better symbol ratio, but requires more computation than the algorithms using
-a sliding window (better suited for long data streams).
+a sliding window (these are better suited for long data streams).
 
 The compressor repeatedly scans the sequence to find elementary patterns as
 symbol pairs, then replaces the most frequent & asymmetric pair by a secondary
@@ -89,9 +89,9 @@ S(ymbol)     x     x      x
 RS           3875  35903  41736
 RPS          x     x      x
 
-gzip -1      3084  x      34807
-gzip         2999  29216  33660
-gzip -9      2999  x      33652
+gzip -1      3084  30322  34807
+gzip         2999  29230  33660
+gzip -9      2999  29216  33652
 
 
 Compression time for ASH (ms):

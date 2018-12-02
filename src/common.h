@@ -3,7 +3,5 @@
 typedef unsigned char uchar_t;
 typedef unsigned int uint_t;
 
-#define structof (type, member, pointer) ({ \
-	const typeof (((type *) 0)->member) * __pointer = (pointer); \
-	(type *) ((char *) __pointer - offsetof (type, member)); \
-	})
+#define structof (type, member, pointer) ( \
+	(type *) ((char *) pointer - offsetof (type, member)))
