@@ -347,23 +347,7 @@ static void expand_rpb ()
 	}
 
 
-// Compression with "symbol"
-
-static void compress_s ()
-	{
-	error (1, 0, "not implemented");
-	}
-
-
-// Decompression with "symbol"
-
-static void expand_s ()
-	{
-	error (1, 0, "not implemented");
-	}
-
-
-// Compression with "repeated symbol"
+// Walking the symbol tree
 
 static uint_t walk_sym_len (symbol_t * sym, uint_t len);
 static void walk_sym (symbol_t * sym, uchar_t len);
@@ -429,6 +413,108 @@ static void walk_sym (symbol_t * sym, uchar_t len)
 	}
 
 
+// Walk the element tree
+
+static void walk_elem (uint_t i)
+	{
+	elem_t * elem  = elements + i;
+	uint_t base = elem->base;
+
+	for (uint_t i = 0; i < elem->size; i++)
+		{
+		uint_t patt = patterns [base++];
+		if (patt & 32768)
+			walk_elem (patt & 32767);
+		else
+			out_byte (patt);
+
+		}
+	}
+
+
+// Compression with "symbol"
+
+static void compress_s ()
+	{
+	crunch_word ();
+
+	uint_t count = sym_sort (SORT_DUP);
+	uchar_t len = log2u (count);
+
+	out_pref_odd (count - 1);
+
+	for (uint_t i = 0; i < count; i++)
+		{
+		index_sym_t * index = index_sym + i;
+		symbol_t * sym = index->sym;
+
+		out_pref_odd (walk_sym_len (sym, 0) - 2);
+		walk_sym (sym, len);
+		}
+
+	out_pref_odd (pos_count - 1);
+
+	list_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+
+		walk_child (sym, len);
+
+		node = node->next;
+		}
+
+	out_pad ();
+	}
+
+
+// Decompression with "symbol"
+
+static void expand_s ()
+	{
+	uint_t count = 1 + in_pref_odd ();
+	uchar_t len = log2u (count);
+
+	for (uint_t i = 0; i < count; i++)
+		{
+		elem_t * elem = elements + i;
+
+		uint_t size = 2 + in_pref_odd ();
+
+		elem->size = size;
+		elem->base = patt_len;
+
+		for (uint_t j = 0; j < size; j++)
+			{
+			if (in_bit ())  // index
+				patterns [patt_len++] = 32768 | in_code (len);
+			else
+				patterns [patt_len++] = in_code (8);
+
+			}
+		}
+
+	count = 1 + in_pref_odd ();
+
+	for (uint_t p = 0; p < count; p++)
+		{
+		if (in_bit ())  // index
+			{
+			uint_t i = in_code (len);
+			walk_elem (i);
+			}
+		else
+			{
+			uchar_t code = in_code (8);
+			out_byte (code);
+			}
+		}
+	}
+
+
+// Compression with "repeated symbol"
+
 static void compress_rs ()
 	{
 	crunch_word ();
@@ -482,23 +568,6 @@ static void compress_rs ()
 
 
 // Decompression with "repeated symbol"
-
-static void walk_elem (uint_t i)
-	{
-	elem_t * elem  = elements + i;
-	uint_t base = elem->base;
-
-	for (uint_t i = 0; i < elem->size; i++)
-		{
-		uint_t patt = patterns [base++];
-		if (patt & 32768)
-			walk_elem (patt & 32767);
-		else
-			out_byte (patt);
-
-		}
-	}
-
 
 static void expand_rs ()
 	{
