@@ -13,12 +13,16 @@
 #define FRAME_MAX 65536  // 64K
 
 
+// Global data
+
 extern uchar_t frame_in [FRAME_MAX];
 extern uchar_t frame_out [FRAME_MAX];
 
 extern uint_t size_in;
 extern uint_t size_out;
 
+
+// Global functions
 
 void in_frame ();
 void out_frame ();

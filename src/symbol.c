@@ -21,7 +21,7 @@ list_t pos_root;
 uint_t pos_count;
 
 index_sym_t index_sym [SYMBOL_MAX];
-
+uint_t index_count;
 
 // Local data
 
@@ -65,34 +65,34 @@ uint_t sym_sort (uint_t filter)
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		uint_t count = sym->pos_count + sym->sym_count;  // number of duplicates
+		uint_t dup_count = sym->pos_count + sym->sym_count;  // number of duplicates
 
 		switch (filter)
 			{
 			case SORT_ALL:
-				index->key = (count + ((sym->rep > 1) ? sym->rep : 0)) * sym->size;
+				index->key = (dup_count + ((sym->rep_count > 1) ? sym->rep_count : 0)) * sym->size;
 				filt_count++;
 				break;
 
 			case SORT_REP:
-				if (sym->rep > 1)
+				if (sym->rep_count > 1)
 					{
 					index->key = 0;
 					break;
 					}
 
-				index->key = count;
+				index->key = dup_count;
 				filt_count++;
 				break;
 
 			case SORT_DUP:
-				if (sym->size == 1 || (count == 1 && sym->rep != 1))
+				if (sym->size == 1 || (dup_count == 1 && sym->rep_count != 1))
 					{
 					index->key = 0;
 					break;
 					}
 
-				index->key = count;
+				index->key = dup_count;
 				filt_count++;
 				break;
 
@@ -143,8 +143,8 @@ void sym_list ()
 		else
 			printf (" size=%u", sym->size);
 
-		if (sym->rep > 1)
-			printf (" rep=%u", sym->rep);
+		if (sym->rep_count > 1)
+			printf (" rep=%u", sym->rep_count);
 		else
 			printf (" pos=%u", sym->pos_count);
 
@@ -430,8 +430,8 @@ void crunch_rep ()
 				sym_rep->pos_count = 1;
 				sym_left->pos_count--;
 
-				sym_rep->rep = 1;
-				sym_left->rep = 1;  // repeated
+				sym_rep->rep_count = 1;
+				sym_left->rep_count = 1;  // repeated
 
 				sym_rep->base = pos_left->base;
 				sym_rep->size = sym_left->size;
@@ -442,7 +442,7 @@ void crunch_rep ()
 
 			sym_left->pos_count--;
 
-			sym_rep->rep++;
+			sym_rep->rep_count++;
 
 			dec_pair (pos_right->pair);
 			pos_right->pair = NULL;

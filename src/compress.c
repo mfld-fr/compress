@@ -24,6 +24,7 @@ struct elem_s
 typedef struct elem_s elem_t;
 
 static elem_t elements [SYMBOL_MAX];
+static uint_t elem_count;
 
 static uint_t patterns [FRAME_MAX];
 static uint_t patt_len;
@@ -31,13 +32,14 @@ static uint_t patt_len;
 
 // Program options
 
-#define ALGO_DEF 0
-#define ALGO_BASE 1
+#define ALGO_DEF      0
+#define ALGO_BASE     1
 #define ALGO_REP_BASE 2
-#define ALGO_PREF 3
+#define ALGO_PREF     3
 #define ALGO_REP_PREF 4
-#define ALGO_SYM 5
-#define ALGO_REP_SYM 6
+#define ALGO_SYM_EXT  5
+#define ALGO_SYM_INT  6
+#define ALGO_REP_SYM  7
 
 uchar_t opt_algo;
 uchar_t opt_compress;
@@ -94,11 +96,11 @@ static void compress_rb ()
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 
-		if (sym->rep > 1)
+		if (sym->rep_count > 1)
 			{
 			out_bit (1);  // repeat flag
 
-			out_pref_odd (sym->rep - 2);
+			out_pref_odd (sym->rep_count - 2);
 
 			sym = sym->left;
 			}
@@ -257,12 +259,12 @@ static void compress_rpb ()
 
 		uchar_t rep = 0;
 
-		if (sym->rep > 1)
+		if (sym->rep_count > 1)
 			{
 			out_bit (1);  // repeat word
 			out_bit (0);
 
-			out_pref_odd (sym->rep - 2);
+			out_pref_odd (sym->rep_count - 2);
 
 			sym = sym->left;
 
@@ -349,56 +351,91 @@ static void expand_rpb ()
 
 // Walking the symbol tree
 
-static uint_t walk_sym_len (symbol_t * sym, uint_t len);
-static void walk_sym (symbol_t * sym, uchar_t len);
+static uint_t walk_sym_len (symbol_t * sym);
+static void walk_sym (symbol_t * sym, uchar_t bit_len);
+static void walk_sym_i (symbol_t * sym, uchar_t bit_len);
 
 
-static uint_t walk_child_len (symbol_t * sym, uint_t len)
+static uint_t walk_child_len (symbol_t * sym)
 	{
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
+	uint_t len;
+
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
 		{
-		len = walk_sym_len (sym, len);
+		len = walk_sym_len (sym);
 		}
 	else
 		{
-		len++;
+		len = 1;  // reference
 		}
 
 	return len;
 	}
 
 
-static void walk_child (symbol_t * sym, uchar_t len)
+static void walk_child (symbol_t * sym, uchar_t bit_len)
 	{
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep != 1))
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
 		{
-		walk_sym (sym, len);
+		walk_sym (sym, bit_len);
 		}
 	else
 		{
 		out_bit (1);  // index
-		out_code (sym->index, len);
+		out_code (sym->index, bit_len);
 		}
 	}
 
 
-static uint_t walk_sym_len (symbol_t * sym, uint_t len)
+static void walk_child_i (symbol_t * sym, uchar_t bit_len)
 	{
-	if (sym->size == 1)
+	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
 		{
-		len++;
+		walk_sym_i (sym, bit_len);
 		}
 	else
 		{
-		len = walk_child_len (sym->left, len);
-		len = walk_child_len (sym->right, len);
-		}
+		if (!sym->len)
+			{
+			out_bit (1);  // definition
+			out_bit (0);
 
-	return len;
+			out_pref_odd (walk_sym_len (sym) - 2);
+			walk_sym_i (sym, bit_len);
+
+			sym->index = index_count++;
+			}
+		else
+			{
+			out_bit (1);  // reference
+			out_bit (1);
+
+			out_code (sym->index, bit_len);
+			}
+		}
 	}
 
 
-static void walk_sym (symbol_t * sym, uchar_t len)
+static uint_t walk_sym_len (symbol_t * sym)
+	{
+	if (!sym->len)
+		{
+		if (sym->size == 1)
+			{
+			sym->len = 1;
+			}
+		else
+			{
+			sym->len = walk_child_len (sym->left);
+			sym->len += walk_child_len (sym->right);
+			}
+		}
+
+	return sym->len;
+	}
+
+
+static void walk_sym (symbol_t * sym, uchar_t bit_len)
 	{
 	if (sym->size == 1)
 		{
@@ -407,8 +444,23 @@ static void walk_sym (symbol_t * sym, uchar_t len)
 		}
 	else
 		{
-		walk_child (sym->left, len);
-		walk_child (sym->right, len);
+		walk_child (sym->left,  bit_len);
+		walk_child (sym->right, bit_len);
+		}
+	}
+
+
+static void walk_sym_i (symbol_t * sym, uchar_t bit_len)
+	{
+	if (sym->size == 1)
+		{
+		out_bit (0);  // code
+		out_code (sym->code, 8);
+		}
+	else
+		{
+		walk_child_i (sym->left,  bit_len);
+		walk_child_i (sym->right, bit_len);
 		}
 	}
 
@@ -433,23 +485,24 @@ static void walk_elem (uint_t i)
 
 
 // Compression with "symbol"
+// Prepended dictionary (external)
 
-static void compress_s ()
+static void compress_se ()
 	{
 	crunch_word ();
 
-	uint_t count = sym_sort (SORT_DUP);
-	uchar_t len = log2u (count);
+	uint_t def_count = sym_sort (SORT_DUP);
+	uchar_t bit_len = log2u (def_count);
 
-	out_pref_odd (count - 1);
+	out_pref_odd (def_count - 1);
 
-	for (uint_t i = 0; i < count; i++)
+	for (uint_t i = 0; i < def_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 
-		out_pref_odd (walk_sym_len (sym, 0) - 2);
-		walk_sym (sym, len);
+		out_pref_odd (walk_sym_len (sym) - 2);
+		walk_sym (sym, bit_len);
 		}
 
 	out_pref_odd (pos_count - 1);
@@ -460,7 +513,7 @@ static void compress_s ()
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 
-		walk_child (sym, len);
+		walk_child (sym, bit_len);
 
 		node = node->next;
 		}
@@ -470,13 +523,14 @@ static void compress_s ()
 
 
 // Decompression with "symbol"
+// Prepended dictionary (external)
 
-static void expand_s ()
+static void expand_se ()
 	{
-	uint_t count = 1 + in_pref_odd ();
-	uchar_t len = log2u (count);
+	uint_t def_count = 1 + in_pref_odd ();
+	uchar_t bit_len = log2u (def_count);
 
-	for (uint_t i = 0; i < count; i++)
+	for (uint_t i = 0; i < def_count; i++)
 		{
 		elem_t * elem = elements + i;
 
@@ -488,20 +542,20 @@ static void expand_s ()
 		for (uint_t j = 0; j < size; j++)
 			{
 			if (in_bit ())  // index
-				patterns [patt_len++] = 32768 | in_code (len);
+				patterns [patt_len++] = 32768 | in_code (bit_len);
 			else
 				patterns [patt_len++] = in_code (8);
 
 			}
 		}
 
-	count = 1 + in_pref_odd ();
+	uint_t pos_count = 1 + in_pref_odd ();
 
-	for (uint_t p = 0; p < count; p++)
+	for (uint_t p = 0; p < pos_count; p++)
 		{
 		if (in_bit ())  // index
 			{
-			uint_t i = in_code (len);
+			uint_t i = in_code (bit_len);
 			walk_elem (i);
 			}
 		else
@@ -510,6 +564,95 @@ static void expand_s ()
 			out_byte (code);
 			}
 		}
+	}
+
+
+// Compression with "symbol"
+// Embedded dictionary (internal)
+
+static void compress_si ()
+	{
+	crunch_word ();
+
+	uint_t def_count = sym_sort (SORT_DUP);
+	uchar_t bit_len = log2u (def_count);
+
+	out_pref_odd (bit_len - 1);
+	out_pref_odd (pos_count - 1);
+
+	list_t * node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		symbol_t * sym = pos->sym;
+
+		walk_child_i (sym, bit_len);
+
+		node = node->next;
+		}
+
+	out_pad ();
+	}
+
+
+// Decompression with "symbol"
+// Embedded dictionary (internal)
+
+static uint_t in_elem (uchar_t bit_len)
+	{
+	uint_t size;
+
+	if (!in_bit ())  // byte code
+		{
+		uchar_t code = in_code (8);
+		out_byte (code);
+		size = 1;
+		}
+	else
+		{
+		if (in_bit ())  // reference
+			{
+			uint_t i = in_code (bit_len);
+			elem_t * elem = elements + i;
+			size = elem->size;
+
+			memcpy (frame_out + size_out, frame_out + elem->base, size);
+
+			size_out += size;
+			}
+		else
+			{
+			// definition
+
+			uint_t base = size_out;
+			size = 0;
+
+			uint_t len = 2 + in_pref_odd ();
+
+			for (uint_t i = 0; i < len; i++)
+				size += in_elem (bit_len);
+
+			// Parent element created after child
+
+			elem_t * elem = elements + elem_count++;
+			elem->base = base;
+			elem->size = size;
+			}
+		}
+
+	return size;
+	}
+
+
+static void expand_si ()
+	{
+	uchar_t bit_len = 1 + in_pref_odd ();
+
+	uint_t pos_count = 1 + in_pref_odd ();
+
+	for (uint_t p = 0; p < pos_count; p++)
+		in_elem (bit_len);
+
 	}
 
 
@@ -530,7 +673,7 @@ static void compress_rs ()
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 
-		out_pref_odd (walk_sym_len (sym, 0) - 2);
+		out_pref_odd (walk_sym_len (sym) - 2);
 		walk_sym (sym, len);
 		}
 
@@ -543,9 +686,9 @@ static void compress_rs ()
 		symbol_t * sym = pos->sym;
 
 		uint_t rep = 1;
-		if (sym->rep > 1)
+		if (sym->rep_count > 1)
 			{
-			rep = sym->rep;
+			rep = sym->rep_count;
 			sym = sym->left;
 
             // TODO: use code, repeat and insert symbols
@@ -651,8 +794,10 @@ int main (int argc, char * argv [])
 						opt_algo = ALGO_PREF;
 					else if (!strcmp (optarg, "rpb"))
 						opt_algo = ALGO_REP_PREF;
-					else if (!strcmp (optarg, "s"))
-						opt_algo = ALGO_SYM;
+					else if (!strcmp (optarg, "se"))
+						opt_algo = ALGO_SYM_EXT;
+					else if (!strcmp (optarg, "si"))
+						opt_algo = ALGO_SYM_INT;
 					else if (!strcmp (optarg, "rs"))
 						opt_algo = ALGO_REP_SYM;
 					else
@@ -685,7 +830,8 @@ int main (int argc, char * argv [])
 			puts ("  rb   repeat base");
 			puts ("  pb   prefixed base");
 			puts ("  rpb  repeat prefixed base");
-			puts ("  s    symbol");
+			puts ("  se   symbol - prepend dictionary (external)");
+			puts ("  si   symbol - embed dictionary (internal)");
 			puts ("  rs   repeat symbol (default)");
 			puts ("");
 			break;
@@ -733,8 +879,12 @@ int main (int argc, char * argv [])
 					compress_rpb ();
 					break;
 
-				case ALGO_SYM:
-					compress_s ();
+				case ALGO_SYM_EXT:
+					compress_se ();
+					break;
+
+				case ALGO_SYM_INT:
+					compress_si ();
 					break;
 
 				case ALGO_REP_SYM:
@@ -792,8 +942,12 @@ int main (int argc, char * argv [])
 					expand_rpb ();
 					break;
 
-				case ALGO_SYM:
-					expand_s ();
+				case ALGO_SYM_EXT:
+					expand_se ();
+					break;
+
+				case ALGO_SYM_INT:
+					expand_si ();
 					break;
 
 				case ALGO_REP_SYM:

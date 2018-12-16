@@ -82,11 +82,12 @@ ENCODING     DATA  CODE   ASH
 
 Initial      6151  43584  51216
 B(ase)       6151  43584  51216   Just for testing
-R(epeat)B    5650  48716  55948   Not efficient
+R(epeat)B    5650  48716  55948   Not efficient for code
 P(refix)B    4840  41659  48955
-RPB          4752  43472  50479   Less efficient
-S(ymbol)     4851  33809  39794
-RS           3875  35903  41736   Less efficient
+RPB          4752  43472  50479   Less efficient for code
+S(ymbol)E    4851  33809  39794
+SI           4547  30853  36307
+RS           3875  35903  41736   Less efficient for code
 PS           x     x      x
 RPS          x     x      x
 
@@ -103,8 +104,9 @@ B(ase)      6         2
 R(epeat)B   -         -
 P(refix)B   8         4
 RPB         -         -
-S(ymbol)    5625      4
-RS          5634      4
+S(ymbol)E   5604      4
+SI          5613      4
+RS          5601      4
 PS          x         x
 RPS         x         x
 

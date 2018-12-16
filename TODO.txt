@@ -5,8 +5,8 @@ Needed:
 
 Improvements:
 - encoding option
-- precompute definition length before serializing
-- merge table and sequence in RS
+- precompute definition length before serializing ?
+- merge table and sequence in RS (= RSI)
 - repeat symbol in tree
 - coding cost computation
 - self optimization based on cost
@@ -19,4 +19,3 @@ Huffman coding experiment:
 - adaptative tree
 - symbol coding
 - lenght and count coding ?
-

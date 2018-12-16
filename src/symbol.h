@@ -15,18 +15,19 @@ struct symbol_s
 
 	uint_t pos_count;  // number of occurrences in the frame
 	uint_t sym_count;  // number of occurrences in the tree
+	uint_t rep_count;  // repeat counter (1 = repeated)
 
-	uchar_t code;  // base byte code (primary symbol)
-	uint_t index;  // index after sort
-	uint_t rep;    // repeat counter
+	uint_t index;  // index of definition after sort or walking
+	uint_t len;    // size of definition after walking
 
-	uint_t base;  // offset of first occurrence in input frame
-	uint_t size;  // size in input codes
+	uchar_t code;  // byte code of base symbol
+	uint_t  base;  // offset of first occurrence in input frame
+	uint_t  size;  // size in byte codes
 
-	// For node symbol (secondary)
+	// For secondary symbol
 
-	struct symbol_s * left;
-	struct symbol_s * right;
+	struct symbol_s * left;   // left or repeated child
+	struct symbol_s * right;  // right child
 	};
 
 typedef struct symbol_s symbol_t;
@@ -85,6 +86,7 @@ struct index_sym_s
 typedef struct index_sym_s index_sym_t;
 
 extern index_sym_t index_sym [SYMBOL_MAX];
+extern uint_t index_count;
 
 
 // Global functions
