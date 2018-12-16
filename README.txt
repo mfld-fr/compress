@@ -55,6 +55,7 @@ Already implemented:
 - asymmetric pairing
 - repeated symbol in sequence
 - tree walking
+- repeated symbol in tree
 - bit coding & streaming
 - external loopback test
 
@@ -87,7 +88,8 @@ P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4851  33809  39794
 SI           4547  30853  36307
-RS           3875  35903  41736   Less efficient for code
+RSE          3875  35903  41736   Less efficient for code
+RSI          x     x      x
 PS           x     x      x
 RPS          x     x      x
 
@@ -106,7 +108,8 @@ P(refix)B   8         4
 RPB         -         -
 S(ymbol)E   5604      4
 SI          5613      4
-RS          5601      4
+RSE         5601      4
+RSI         x         x
 PS          x         x
 RPS         x         x
 

@@ -36,9 +36,22 @@ extern list_t sym_root;
 extern uint_t sym_count;
 
 
-// Position definitions
+// Pair definitions
 
-struct pair_s;
+struct pair_s
+	{
+	list_t node;  // must be the first member
+
+	uint_t count;  // number of occurrences in the frame
+
+	struct symbol_s * left;
+	struct symbol_s * right;
+	};
+
+typedef struct pair_s pair_t;
+
+
+// Position definitions
 
 struct position_s
 	{
@@ -54,21 +67,6 @@ typedef struct position_s position_t;
 
 extern list_t pos_root;
 extern uint_t pos_count;
-
-
-// Pair definitions
-
-struct pair_s
-	{
-	list_t node;  // must be the first member
-
-	uint_t count;  // number of occurrences in the frame
-
-	struct symbol_s * left;
-	struct symbol_s * right;
-	};
-
-typedef struct pair_s pair_t;
 
 
 // Indexes for quick sort

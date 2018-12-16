@@ -39,7 +39,7 @@ static uint_t patt_len;
 #define ALGO_REP_PREF 4
 #define ALGO_SYM_EXT  5
 #define ALGO_SYM_INT  6
-#define ALGO_REP_SYM  7
+#define ALGO_REP_SE   7
 
 uchar_t opt_algo;
 uchar_t opt_compress;
@@ -657,8 +657,9 @@ static void expand_si ()
 
 
 // Compression with "repeated symbol"
+// Prepended dictionary (external)
 
-static void compress_rs ()
+static void compress_rse ()
 	{
 	crunch_word ();
 	crunch_rep ();
@@ -711,8 +712,9 @@ static void compress_rs ()
 
 
 // Decompression with "repeated symbol"
+// Prepended dictionary (external)
 
-static void expand_rs ()
+static void expand_rse ()
 	{
 	uint_t count = 1 + in_pref_odd ();
 	uchar_t len = log2u (count);
@@ -798,8 +800,8 @@ int main (int argc, char * argv [])
 						opt_algo = ALGO_SYM_EXT;
 					else if (!strcmp (optarg, "si"))
 						opt_algo = ALGO_SYM_INT;
-					else if (!strcmp (optarg, "rs"))
-						opt_algo = ALGO_REP_SYM;
+					else if (!strcmp (optarg, "rse"))
+						opt_algo = ALGO_REP_SE;
 					else
 						error (1, 0, "unknown algorithm");
 
@@ -830,9 +832,9 @@ int main (int argc, char * argv [])
 			puts ("  rb   repeat base");
 			puts ("  pb   prefixed base");
 			puts ("  rpb  repeat prefixed base");
-			puts ("  se   symbol - prepend dictionary (external)");
-			puts ("  si   symbol - embed dictionary (internal)");
-			puts ("  rs   repeat symbol (default)");
+			puts ("  se   symbol external (prepend dictionary)");
+			puts ("  si   symbol internal (embed dictionary)");
+			puts ("  rse  repeat symbol external (default)");
 			puts ("");
 			break;
 			}
@@ -887,12 +889,12 @@ int main (int argc, char * argv [])
 					compress_si ();
 					break;
 
-				case ALGO_REP_SYM:
-					compress_rs ();
+				case ALGO_REP_SE:
+					compress_rse ();
 					break;
 
 				default:
-					compress_rs ();
+					compress_rse ();
 					break;
 
 				}
@@ -950,12 +952,12 @@ int main (int argc, char * argv [])
 					expand_si ();
 					break;
 
-				case ALGO_REP_SYM:
-					expand_rs ();
+				case ALGO_REP_SE:
+					expand_rse ();
 					break;
 
 				default:
-					expand_rs ();
+					expand_rse ();
 					break;
 
 				}
