@@ -55,7 +55,6 @@ Already implemented:
 - asymmetric pairing
 - repeated symbol in sequence
 - tree walking
-- repeated symbol in tree
 - bit coding & streaming
 - external loopback test
 
@@ -97,6 +96,8 @@ gzip -1      3084  30322  34807
 gzip         2999  29230  33660
 gzip -9      2999  29216  33652
 
+exomizer     2956  29073  33192
+
 
 Compression time for ASH (ms):
 
@@ -116,3 +117,5 @@ RPS         x         x
 gzip -1     4         2
 gzip        6         2
 gzip -9     6         2
+
+exomizer    2146      3
