@@ -3,13 +3,13 @@ if [ $# -ne 2 ]; then
 	exit 1
 	fi
 
-echo "Compressing..."
-Release/compress -cvs $1 -m $2 test_out.bin > test.txt
+echo "1- COMPRESS"
+Release/compress -cv $1 -m $2 test_out.bin | tee test.txt
 
-echo "Expanding..."
-Release/compress -ev -m $2 test_out.bin test_in.bin >> test.txt
+echo "2- EXPAND"
+Release/compress -ev -m $2 test_out.bin test_in.bin | tee -a test.txt
 
-echo "Comparing..."
+echo "3- COMPARE"
 dump $1 > $1.txt
 dump test_in.bin > test_in.txt
 diff --color $1.txt test_in.txt

@@ -105,11 +105,11 @@ ENCODING    COMPRESS  EXPAND
 
 B(ase)      6         2
 R(epeat)B   -         -
-P(refix)B   8         4
+P(refix)B   9         3
 RPB         -         -
-S(ymbol)E   5604      4
-SI          5613      4
-RSE         5601      4
+S(ymbol)E   2271      2
+SI          2240      2
+RSE         2395      2
 RSI         x         x
 PS          x         x
 RPS         x         x

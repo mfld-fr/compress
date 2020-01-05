@@ -69,6 +69,18 @@ extern list_t pos_root;
 extern uint_t pos_count;
 
 
+// Hole definitions
+
+struct hole_s
+	{
+	list_t node;  // must be the first member
+
+	position_t * pos;
+	};
+
+typedef struct hole_s hole_t;
+
+
 // Indexes for quick sort
 
 #define SORT_ALL 0  // all symbols

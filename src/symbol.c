@@ -23,10 +23,14 @@ uint_t pos_count;
 index_sym_t index_sym [SYMBOL_MAX];
 uint_t index_count;
 
+
 // Local data
 
 static list_t pair_root;
+static list_t hole_root;
 
+
+// Symbol helpers
 
 static int sym_comp (const void * v1, const void * v2)
 	{
@@ -155,12 +159,22 @@ void sym_list ()
 	}
 
 
+static void hole_add (position_t * pos)
+	{
+	hole_t * hole = malloc (sizeof (hole_t));
+	hole->pos = pos;
+	list_add_tail (&hole_root, (list_t *) hole);  // node as first member
+	}
+
+
 // Scan frame for all base symbols
 
 void scan_base ()
 	{
 	list_init (&sym_root);
 	list_init (&pos_root);
+
+	list_init (&hole_root);
 
 	memset (index_sym, 0, sizeof (index_sym_t) * CODE_MAX);
 
@@ -189,6 +203,10 @@ void scan_base ()
 		pos->sym = sym;
 		pos->pair = NULL;
 
+		// Record hole (= position without pair)
+
+		if (i + 1 < size_in) hole_add (pos);
+
 		sym->pos_count++;
 		}
 
@@ -196,71 +214,70 @@ void scan_base ()
 	}
 
 
-// Scan frame for new pairs
-
-// TODO: optimize the pair scan with a sublist
-// initialized by scan_base and updated by crunch_pair
+// Scan frame holes for new pairs
 
 static void scan_pair ()
 	{
-	list_t * node_left = pos_root.next;
-	while ((node_left != pos_root.prev) && (node_left != &pos_root))
+	list_t * hole_left = hole_root.next;
+	while (hole_left != &hole_root)
 		{
-		list_t * node_left_next = node_left->next;
+		position_t * pos_left = ((hole_t *) hole_left)->pos;  // node as first member
+		position_t * pos_left_next = (position_t *) (pos_left->node.next);
 
-		position_t * pos_left = (position_t *) node_left;  // node as first member
-		if (!pos_left->pair)  // skip already found pair
+		// Add new pair
+
+		pair_t * pair = malloc (sizeof (pair_t));
+		list_add_tail (&pair_root, (list_t *) pair);  // node as first member
+
+		pair->count = 1;
+
+		pair->left = pos_left->sym;
+		pair->right = pos_left_next->sym;
+
+		pos_left->pair = pair;  // pair now found there
+
+		// Scan for pair duplicates
+
+		list_t * hole_right = hole_left->next;
+		while (hole_right != &hole_root)
 			{
-			// Add new pair
+			list_t * hole_right_next = hole_right->next;
 
-			pair_t * pair = malloc (sizeof (pair_t));
-			list_add_tail (&pair_root, (list_t *) pair);  // node as first member
+			position_t * pos_right = ((hole_t *) hole_right)->pos;  // node as first member
+			position_t * pos_right_next = (position_t *) (pos_right->node.next);
 
-			pair->count = 1;
-
-			pair->left = pos_left->sym;
-			pair->right = ((position_t *) node_left_next)->sym;
-
-			pos_left->pair = pair;  // pair now found there
-
-			// Scan for pair duplicates
-
-			list_t * node_right = node_left->next;
-			while ((node_right != pos_root.prev) && (node_right != &pos_root))
+			if ((pair->left == pos_right->sym) &&
+				(pair->right == pos_right_next->sym))
 				{
-				list_t * node_right_next = node_right->next;
+				pair->count++;
 
-				position_t * pos_right = (position_t *) node_right;  // node as first member
-
-				if (!pos_right->pair &&  // skip already found pair
-					(pair->left == pos_right->sym) &&
-					(pair->right == ((position_t *) node_right_next)->sym))
-					{
-					pos_right->pair = pair;  // pair now found there
-
-					pair->count++;
-					}
-
-				node_right = node_right_next;
+				pos_right->pair = pair;  // pair now found there
+				list_remove (hole_right);
+				memset (hole_right, 0, sizeof (hole_t));  // invalidate pointers
+				free ((hole_t *) hole_right);  // node as first member
 				}
+
+			hole_right = hole_right_next;
 			}
 
-		node_left = node_left_next;
+		list_t * hole_left_next = hole_left->next;
+		list_remove (hole_left);
+		memset (hole_left, 0, sizeof (hole_t));  // invalidate pointers
+		free ((hole_t *) hole_left);  // node as first member
+		hole_left = hole_left_next;
 		}
 	}
 
 
 static void dec_pair (pair_t * pair)
 	{
-	if (pair)
-		{
-		pair->count--;
+	pair->count--;
 
-		if (!pair->count)
-			{
-			list_remove ((list_t *) pair);  // node as first member
-			free (pair);
-			}
+	if (!pair->count)
+		{
+		list_remove ((list_t *) pair);  // node as first member
+		memset (pair, 0, sizeof (pair_t));  // invalidate pointers
+		free (pair);
 		}
 	}
 
@@ -290,8 +307,12 @@ static int crunch_pair (pair_t * pair)
 			if (node_prev != &pos_root)
 				{
 				position_t * pos_prev = (position_t *) node_prev;  // node as first member
-				dec_pair (pos_prev->pair);
-				pos_prev->pair = NULL;
+				if (pos_prev->pair)  // can be the pair just processed before
+					{
+					dec_pair (pos_prev->pair);
+					pos_prev->pair = NULL;
+					hole_add (pos_prev);
+					}
 				}
 
 			// Consider next pair
@@ -301,6 +322,7 @@ static int crunch_pair (pair_t * pair)
 				position_t * pos_next = (position_t *) node_next;  // node as first member
 				dec_pair (pos_next->pair);
 				pos_next->pair = NULL;
+				//hole_add (pos_next);  // position will be crunched later
 				}
 
 			// Replace current pair by new symbol
@@ -330,6 +352,7 @@ static int crunch_pair (pair_t * pair)
 
 			dec_pair (pair);
 			pos->pair = NULL;
+			hole_add (pos);
 
 			// Shift frame end to left
 
