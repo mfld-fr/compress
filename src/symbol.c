@@ -59,23 +59,20 @@ symbol_t * sym_add ()
 // Build index and sort
 // TODO: build key in callback
 
-uint_t sym_sort (uint_t filter)
+uint_t sym_sort (uint_t kind)
 	{
-	uint_t filt_count = 0;
-
 	list_t * node = sym_root.next;
 	for (uint_t i = 0; i < sym_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		uint_t dup_count = sym->pos_count + sym->sym_count;  // number of duplicates
+		sym->dup_count = sym->sym_count + sym->pos_count;
 
-		switch (filter)
+		switch (kind)
 			{
 			case SORT_ALL:
-				index->key = (dup_count + ((sym->rep_count > 1) ? sym->rep_count : 0)) * sym->size;
-				filt_count++;
+				index->key = sym->dup_count + (sym->rep_count > 1 ? sym->rep_count : 0) * sym->size;
 				break;
 
 			case SORT_REP:
@@ -85,21 +82,15 @@ uint_t sym_sort (uint_t filter)
 					break;
 					}
 
-				index->key = dup_count;
-				filt_count++;
+				index->key = sym->dup_count;
 				break;
 
 			case SORT_DUP:
-				if (sym->size == 1 || (dup_count == 1 && sym->rep_count != 1))
-					{
-					index->key = 0;
-					break;
-					}
-
-				index->key = dup_count;
-				filt_count++;
+				index->key = sym->dup_count;
 				break;
 
+			default:
+				error (1, 0, "unknown sorting");
 			}
 
 		index->sym = sym;
@@ -118,24 +109,55 @@ uint_t sym_sort (uint_t filter)
 		sym->index = i;
 		}
 
+	return 0;
+	}
+
+
+// Initial symbol filtering
+
+uint_t filter_init ()
+	{
+	uint_t filt_count = 0;
+
+	list_t * node = sym_root.next;
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+
+		sym->dup_count = sym->pos_count + sym->sym_count;
+		if (sym->dup_count > 1)
+			{
+			// Duplicated symbols are presumed valuable
+			// until cost computation confirms or not
+			sym->keep = 1;
+			filt_count++;
+			}
+
+		node = node->next;
+		}
+
 	return filt_count;
 	}
 
 
 // List the used symbols
 
-void sym_list ()
+void sym_list (uint_t filter)
 	{
 	double entropy = 0.0;
+	uint use_count = 0;
 
-	puts ("SYMBOLS");
+	puts ("\nSYMBOLS");
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = index->sym;
 
+		if (filter == LIST_KEEP && !sym->keep) continue;
+
 		uint_t sym_dup = sym->pos_count + sym->sym_count;
+		use_count += sym_dup;
 
 		double p = (double) sym_dup / (pos_count + sym_count);
 		entropy += -p * log2 (p);
@@ -152,10 +174,11 @@ void sym_list ()
 		else
 			printf (" pos=%u", sym->pos_count);
 
-		printf (" sym=%u\n", sym->sym_count);
+		printf (" tree=%u\n", sym->sym_count);
 		}
 
-	printf ("\nentropy=%f\n\n", entropy);
+	printf ("\nEntropy: %f\n", entropy);
+	printf ("Limit: %f\n\n", entropy * use_count);
 	}
 
 

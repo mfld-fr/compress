@@ -60,9 +60,18 @@ void out_frame (const char * name)
 void out_byte (uchar_t val)
 	{
 	if (size_out >= FRAME_MAX)
+		{
+		puts ("HELP!");
 		error (1, 0, "out overflow");
+		}
 
 	frame_out [size_out++] = val;
+	}
+
+
+uchar in_eof ()
+	{
+	return pos_in == size_in;
 	}
 
 
@@ -130,6 +139,7 @@ void out_pad ()
 
 void out_code (uint_t code, uchar_t len)
 	{
+	if (!len) return;
 	if (len > 16)
 		error (1, 0, "code too long");
 
@@ -146,6 +156,7 @@ void out_code (uint_t code, uchar_t len)
 
 uint_t in_code (uchar_t len)
 	{
+	if (!len) return 0;
 	if (len > 16)
 		error (1, 0, "code too long");
 
@@ -181,6 +192,20 @@ uchar_t in_len ()
 	return len;
 	}
 
+
+uint cost_pref_odd (uint val)
+	{
+	uchar prefix = 0;
+	uint base = 1;
+
+	while (val >= base)
+		{
+		base = (base << 1) | 1;
+		prefix++;
+		}
+
+	return 1 + prefix * 2;
+	}
 
 void out_pref_odd (uint_t val)
 	{
@@ -254,6 +279,7 @@ uint_t in_pref_even ()
 
 uchar_t log2u (uint_t val)
 	{
+	if (!val) return 0;
 	uchar_t log = 1;
 	while (val >>= 1) log++;
 	return log;

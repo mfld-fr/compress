@@ -6,7 +6,9 @@
 #include <time.h>
 #include <error.h>
 #include <unistd.h>
+#include <limits.h>
 
+#include "common.h"
 #include "list.h"
 #include "stream.h"
 #include "symbol.h"
@@ -352,15 +354,12 @@ static void expand_rpb ()
 // Walking the symbol tree
 
 static uint_t walk_sym_len (symbol_t * sym);
-static void walk_sym (symbol_t * sym, uchar_t bit_len);
-static void walk_sym_i (symbol_t * sym, uchar_t bit_len);
-
 
 static uint_t walk_child_len (symbol_t * sym)
 	{
 	uint_t len;
 
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
+	if (!sym->keep)
 		{
 		len = walk_sym_len (sym);
 		}
@@ -372,12 +371,72 @@ static uint_t walk_child_len (symbol_t * sym)
 	return len;
 	}
 
-
-static void walk_child (symbol_t * sym, uchar_t bit_len)
+static uint_t walk_sym_len (symbol_t * sym)
 	{
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
+	if (!sym->len)
 		{
-		walk_sym (sym, bit_len);
+		if (sym->size == 1)
+			{
+			sym->len = 1;  // base code
+			}
+		else
+			{
+			sym->len = walk_child_len (sym->left);
+			sym->len += walk_child_len (sym->right);
+			}
+		}
+
+	return sym->len;
+	}
+
+
+// Walk tree to compute cost
+
+static uint_t walk_def_cost (symbol_t * sym, uchar_t bit_len);
+
+static uint_t walk_use_cost (symbol_t * sym, uchar_t bit_len)
+	{
+	uint_t cost;
+
+	if (!sym->keep)
+		{
+		cost = walk_def_cost (sym, bit_len);
+		}
+	else
+		{
+		// '1' for 'reference' + size of 'index'
+		cost = 1 + bit_len;
+		}
+
+	return cost;
+	}
+
+static uint_t walk_def_cost (symbol_t * sym, uchar_t bit_len)
+	{
+	uint_t cost;
+
+	if (sym->size == 1)
+		{
+		// '0' for 'base' + 8 for base code
+		cost = 1 + 8;
+		}
+	else
+		{
+		cost = walk_use_cost (sym->left, bit_len);
+		cost += walk_use_cost (sym->right, bit_len);
+		}
+
+	return cost;
+	}
+
+
+static void walk_def_out (symbol_t * sym, uchar_t bit_len);
+
+static void walk_use_out (symbol_t * sym, uchar_t bit_len)
+	{
+	if (!sym->keep)
+		{
+		walk_def_out (sym, bit_len);
 		}
 	else
 		{
@@ -386,6 +445,22 @@ static void walk_child (symbol_t * sym, uchar_t bit_len)
 		}
 	}
 
+static void walk_def_out (symbol_t * sym, uchar_t bit_len)
+	{
+	if (sym->size == 1)
+		{
+		out_bit (0);  // code
+		out_code (sym->code, 8);
+		}
+	else
+		{
+		walk_use_out (sym->left,  bit_len);
+		walk_use_out (sym->right, bit_len);
+		}
+	}
+
+
+static void walk_sym_i (symbol_t * sym, uchar_t bit_len);
 
 static void walk_child_i (symbol_t * sym, uchar_t bit_len)
 	{
@@ -416,40 +491,6 @@ static void walk_child_i (symbol_t * sym, uchar_t bit_len)
 	}
 
 
-static uint_t walk_sym_len (symbol_t * sym)
-	{
-	if (!sym->len)
-		{
-		if (sym->size == 1)
-			{
-			sym->len = 1;
-			}
-		else
-			{
-			sym->len = walk_child_len (sym->left);
-			sym->len += walk_child_len (sym->right);
-			}
-		}
-
-	return sym->len;
-	}
-
-
-static void walk_sym (symbol_t * sym, uchar_t bit_len)
-	{
-	if (sym->size == 1)
-		{
-		out_bit (0);  // code
-		out_code (sym->code, 8);
-		}
-	else
-		{
-		walk_child (sym->left,  bit_len);
-		walk_child (sym->right, bit_len);
-		}
-	}
-
-
 static void walk_sym_i (symbol_t * sym, uchar_t bit_len)
 	{
 	if (sym->size == 1)
@@ -467,20 +508,35 @@ static void walk_sym_i (symbol_t * sym, uchar_t bit_len)
 
 // Walk the element tree
 
+#define PATTERN_MAX (32768)
+
+static uint last_elem = 0;
+static uint depth = 0;
+
 static void walk_elem (uint_t i)
 	{
+	depth++;
+	if (last_elem == i && depth > 1)
+		{
+		puts ("HELP !");
+		}
+
 	elem_t * elem  = elements + i;
 	uint_t base = elem->base;
 
-	for (uint_t i = 0; i < elem->size; i++)
+	for (uint_t j = 0; j < elem->size; j++)
 		{
 		uint_t patt = patterns [base++];
-		if (patt & 32768)
-			walk_elem (patt & 32767);
+		if (patt & PATTERN_MAX)
+			{
+			last_elem = i;
+			walk_elem (patt & (PATTERN_MAX - 1));
+			}
 		else
 			out_byte (patt);
 
 		}
+	depth--;
 	}
 
 
@@ -491,29 +547,159 @@ static void compress_se ()
 	{
 	crunch_word ();
 
-	uint_t def_count = sym_sort (SORT_DUP);
-	uchar_t bit_len = log2u (def_count);
+	if (opt_sym)
+		{
+		sym_sort (SORT_DUP);
+		sym_list (LIST_ALL);
+		}
+
+	// Initial symbol filtering
+
+	uint_t def_count = filter_init ();
+	uchar_t bit_len;
+
+	uint min_cost = UINT_MAX;
+	uint min_def = def_count;
+
+	while (1)
+		{
+		bit_len = log2u (def_count - 1);
+
+		// Compute tree cost
+
+		uint_t tree_cost = 0;
+		list_t * node = sym_root.next;
+		for (uint_t i = 0; i < sym_count; i++)
+			{
+			symbol_t * sym = (symbol_t *) node;  // node as first member
+			walk_sym_len (sym);
+			if (sym->keep)
+				{
+				uint_t cost0 = walk_def_cost (sym, bit_len);
+				uint_t cost1 = cost0;
+				if (sym->len > 1) cost1 += cost_pref_odd (sym->len);
+				sym->tree_gain = cost0 * sym->sym_count - cost1 - (1 + bit_len) * sym->sym_count;
+				tree_cost += cost1;
+				}
+
+			node = node->next;
+			}
+
+		// Compute frame cost
+
+		uint_t pos_cost = 0;
+		node = pos_root.next;
+		while (node != &pos_root)
+			{
+			position_t * pos = (position_t *) node;  // node as first member
+			symbol_t * sym = pos->sym;
+
+			uint_t cost0 = walk_use_cost (sym, bit_len);
+			uint_t cost1 = walk_def_cost (sym, bit_len);
+			sym->pos_gain += cost1 - cost0;
+			pos_cost += cost0;
+
+			node = node->next;
+			}
+
+		// Compute total cost
+		// and get the gain looser
+
+		int gain_min = INT_MAX;
+		symbol_t * sym_min = NULL;
+
+		node = sym_root.next;
+		for (uint_t i = 0; i < sym_count; i++)
+			{
+			symbol_t * sym = (symbol_t *) node;  // node as first member
+			if (sym->keep)
+				{
+				sym->all_gain = sym->tree_gain + sym->pos_gain;
+				if (sym->all_gain < gain_min)
+					{
+					gain_min = sym->all_gain;
+					sym_min = sym;
+					}
+				}
+
+			node = node->next;
+			}
+
+		uint_t all_cost = tree_cost + pos_cost;
+		if (all_cost < min_cost)
+			{
+			min_cost = all_cost;
+			min_def = def_count;
+			}
+
+		sym_min->keep = 0;
+		sym_min->pass = def_count;
+
+		// Reset previous calculation
+
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = (symbol_t *) node;  // node as first member
+			sym->len = 0;
+			node = node->next;
+			}
+
+		if (--def_count == 0) break;
+		}
+
+	if (opt_verb)
+		{
+		printf ("Minimal encoding cost = %u\n", min_cost);
+		printf ("Best definition count = %u\n\n", min_def);
+		}
+
+	def_count = min_def;
+	bit_len = log2u (def_count - 1);
+
+	// Index the symbols
+
+	uint_t index = 0;
+	list_t * node = sym_root.next;
+	while (node != &sym_root)
+		{
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+		if (sym->pass && sym->pass <= def_count)
+			{
+			sym->keep = 1;
+			sym->index = index++;
+			}
+
+		node = node->next;
+		}
+
+	// Output symbol dictionary
 
 	out_pref_odd (def_count - 1);
 
-	for (uint_t i = 0; i < def_count; i++)
+	node = sym_root.next;
+	while (node != &sym_root)
 		{
-		index_sym_t * index = index_sym + i;
-		symbol_t * sym = index->sym;
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+		if (sym->keep)
+			{
+			uint_t len = walk_sym_len (sym);
+			if (len > 1) out_pref_odd (len - 1);
+			walk_def_out (sym, bit_len);
+			}
 
-		out_pref_odd (walk_sym_len (sym) - 2);
-		walk_sym (sym, bit_len);
+		node = node->next;
 		}
 
-	out_pref_odd (pos_count - 1);
+	// Output frame
 
-	list_t * node = pos_root.next;
+	node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
 		symbol_t * sym = pos->sym;
 
-		walk_child (sym, bit_len);
+		walk_use_out (sym, bit_len);
 
 		node = node->next;
 		}
@@ -528,31 +714,32 @@ static void compress_se ()
 static void expand_se ()
 	{
 	uint_t def_count = 1 + in_pref_odd ();
-	uchar_t bit_len = log2u (def_count);
+	uchar_t bit_len = log2u (def_count - 1);
 
 	for (uint_t i = 0; i < def_count; i++)
 		{
 		elem_t * elem = elements + i;
 
-		uint_t size = 2 + in_pref_odd ();
+		uint_t size = 1 + in_pref_odd ();
 
 		elem->size = size;
 		elem->base = patt_len;
 
-		for (uint_t j = 0; j < size; j++)
-			{
-			if (in_bit ())  // index
-				patterns [patt_len++] = 32768 | in_code (bit_len);
-			else
-				patterns [patt_len++] = in_code (8);
+		if (size == 1)
+			patterns [patt_len++] = in_code (8);
+		else
+			for (uint_t j = 0; j < size; j++)
+				if (in_bit ())  // index
+					patterns [patt_len++] = PATTERN_MAX | in_code (bit_len);
+				else
+					patterns [patt_len++] = in_code (8);
 
-			}
 		}
 
-	uint_t pos_count = 1 + in_pref_odd ();
-
-	for (uint_t p = 0; p < pos_count; p++)
+	while (1)
 		{
+		if (in_eof ()) break;
+
 		if (in_bit ())  // index
 			{
 			uint_t i = in_code (bit_len);
@@ -675,7 +862,7 @@ static void compress_rse ()
 		symbol_t * sym = index->sym;
 
 		out_pref_odd (walk_sym_len (sym) - 2);
-		walk_sym (sym, len);
+		walk_def_out (sym, len);
 		}
 
 	out_pref_odd (pos_count - 1);
@@ -692,7 +879,7 @@ static void compress_rse ()
 			rep = sym->rep_count;
 			sym = sym->left;
 
-            // TODO: use code, repeat and insert symbols
+			// TODO: use code, repeat and insert symbols
 
 			out_bit (1);   // repeat
 			out_pref_odd (rep - 2);
@@ -702,7 +889,7 @@ static void compress_rse ()
 			out_bit (0);  // no repeat
 			}
 
-		walk_child (sym, len);
+		walk_use_out (sym, len);
 
 		node = node->next;
 		}
@@ -832,8 +1019,8 @@ int main (int argc, char * argv [])
 			puts ("  rb   repeat base");
 			puts ("  pb   prefixed base");
 			puts ("  rpb  repeat prefixed base");
-			puts ("  se   symbol external (prepend dictionary)");
-			puts ("  si   symbol internal (embed dictionary)");
+			puts ("  se   symbol external (prepended dictionary)");
+			puts ("  si   symbol internal (embedded dictionary)");
 			puts ("  rse  repeat symbol external (default)");
 			puts ("");
 			break;
@@ -851,17 +1038,17 @@ int main (int argc, char * argv [])
 			if (opt_verb)
 				{
 				puts ("INITIAL");
-				printf ("frame length=%u\n", size_in);
-				printf ("symbol count=%u\n\n", sym_count);
+				printf ("Frame length: %u\n", size_in);
+				printf ("Base symbol count: %u\n\n", sym_count);
 				}
 
 			if (opt_sym)
 				{
 				sym_sort (SORT_ALL);
-				sym_list ();
+				sym_list (LIST_ALL);
 				}
 
-			if (opt_verb) printf ("Compressing...");
+			if (opt_verb) puts ("Compressing...\n");
 
 			switch (opt_algo)
 				{
@@ -894,28 +1081,19 @@ int main (int argc, char * argv [])
 					break;
 
 				default:
-					compress_rse ();
+					compress_se ();
 					break;
 
-				}
-
-			if (opt_verb) puts (" DONE\n");
-
-			if (opt_sym)
-				{
-				sym_sort (SORT_ALL);
-				sym_list ();
 				}
 
 			if (opt_verb)
 				{
 				puts ("FINAL");
-				printf ("frame size=%u\n", pos_count);
-				printf ("symbol count=%u\n", sym_count);
-				printf ("frame length=%u\n", size_out);
+				printf ("Frame length: %u\n", pos_count);
+				printf ("Frame size: %u\n", size_out);
 
 				double ratio = (double) size_out / size_in;
-				printf ("ratio=%f\n\n", ratio);
+				printf ("Compression ratio: %f\n\n", ratio);
 				}
 
 			out_frame (argv [optind + 1]);
@@ -957,7 +1135,7 @@ int main (int argc, char * argv [])
 					break;
 
 				default:
-					expand_rse ();
+					expand_se ();
 					break;
 
 				}
@@ -972,7 +1150,7 @@ int main (int argc, char * argv [])
 		}
 
 	clock_t clock_end = clock ();
-	if (opt_verb) printf ("elapsed=%lu usecs\n\n", clock_end - clock_begin);
+	if (opt_verb) printf ("elapsed=%lf msecs\n\n", (clock_end - clock_begin) * 1000.0 / CLOCKS_PER_SEC);
 
 	return 0;
 	}

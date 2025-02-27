@@ -85,7 +85,7 @@ B(ase)       6151  43584  51216   Just for testing
 R(epeat)B    5650  48716  55948   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
-S(ymbol)E    4851  33809  39794
+S(ymbol)E    4835  31821  38006
 SI           4547  30853  36307
 RSE          3875  35903  41736   Less efficient for code
 RSI          x     x      x
@@ -107,7 +107,7 @@ B(ase)      6         2
 R(epeat)B   -         -
 P(refix)B   9         3
 RPB         -         -
-S(ymbol)E   2271      2
+S(ymbol)E   3885      6
 SI          2240      2
 RSE         2395      2
 RSI         x         x

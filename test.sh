@@ -4,10 +4,10 @@ if [ $# -ne 2 ]; then
 	fi
 
 echo "1- COMPRESS"
-Release/compress -cv $1 -m $2 test_out.bin | tee test.txt
+Release/compress -cvs $1 -m $2 test_out.bin | tee test.txt
 
 echo "2- EXPAND"
-Release/compress -ev -m $2 test_out.bin test_in.bin | tee -a test.txt
+Release/compress -evs -m $2 test_out.bin test_in.bin | tee -a test.txt
 
 echo "3- COMPARE"
 dump $1 > $1.txt

@@ -15,10 +15,17 @@ struct symbol_s
 
 	uint_t pos_count;  // number of occurrences in the frame
 	uint_t sym_count;  // number of occurrences in the tree
-	uint_t rep_count;  // repeat counter (1 = repeated)
+	uint_t rep_count;  // number of repetitions (1 = repeated)
+	uint_t dup_count;  // total number of occurences (= pos_count + tree_count)
 
-	uint_t index;  // index of definition after sort or walking
-	uint_t len;    // size of definition after walking
+	uchar_t keep;   // define this symbol in the dictionary
+	uint_t  index;  // index in the dictionary
+	uint_t  len;    // length of symbol when defined or used
+	uint    pass;   // pass number that discarded this symbol
+
+	int tree_gain;  // gain in tree when defined
+	int pos_gain;   // gain in frame when defined
+	int all_gain;   // overall gain when defined
 
 	uchar_t code;  // byte code of base symbol
 	uint_t  base;  // offset of first occurrence in input frame
@@ -60,7 +67,7 @@ struct position_s
 	uint_t base;
 
 	symbol_t * sym;
-	struct pair_s * pair;
+	pair_t * pair;
 	};
 
 typedef struct position_s position_t;
@@ -81,11 +88,11 @@ struct hole_s
 typedef struct hole_s hole_t;
 
 
-// Indexes for quick sort
+// Kind of sorting
 
-#define SORT_ALL 0  // all symbols
+#define SORT_ALL 0  // sort by impact (occurences * size)
 #define SORT_REP 1  // filter repeat out
-#define SORT_DUP 2  // duplicated only
+#define SORT_DUP 2  // sort by occurences
 
 struct index_sym_s
 	{
@@ -99,11 +106,19 @@ extern index_sym_t index_sym [SYMBOL_MAX];
 extern uint_t index_count;
 
 
+// Listing filters
+
+#define LIST_ALL  0  // list all symbols
+#define LIST_KEEP 1  // list only defined
+
+
 // Global functions
 
 symbol_t * sym_add ();
-uint_t sym_sort (uint_t filter);
-void sym_list ();
+uint_t sym_sort (uint_t kind);
+void sym_list (uint_t filter);
+
+uint_t filter_init ();
 
 void scan_base ();
 
