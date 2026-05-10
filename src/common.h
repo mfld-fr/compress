@@ -5,5 +5,7 @@ typedef unsigned char uchar;
 typedef unsigned int uint_t;
 typedef unsigned int uint;
 
-#define structof (type, member, pointer) ( \
+#include <stddef.h>  // for offsetof macro
+
+#define structof(type, member, pointer) ( \
 	(type *) ((char *) pointer - offsetof (type, member)))

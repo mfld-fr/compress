@@ -56,6 +56,7 @@ Already implemented:
 - repeated symbol in sequence
 - tree walking
 - bit coding & streaming
+- encoding cost computation
 - external loopback test
 
 Result:
@@ -69,8 +70,8 @@ See TODO.txt for next steps.
 
 BENCHMARK
 
-Samples from ELKS project:
-https://github.com/jbruchon/elks
+Samples from the ELKS project:
+https://github.com/ghaerr/elks
 
 - data: kernel data only
 - code: kernel code only
@@ -86,7 +87,7 @@ R(epeat)B    5650  48716  55948   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4835  31821  38006
-SI           4547  30853  36307
+SI           4636  31527  37095
 RSE          3875  35903  41736   Less efficient for code
 RSI          x     x      x
 PS           x     x      x

@@ -1,3 +1,5 @@
 /Debug/
-/gmon.out
 /Release/
+/gmon.out
+/test.out
+/test.in

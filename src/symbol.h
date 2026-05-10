@@ -12,16 +12,26 @@
 struct symbol_s
 	{
 	list_t node;  // must be the first member
+	//list_t kept;
+	list_t node_level;
 
 	uint_t pos_count;  // number of occurrences in the frame
 	uint_t sym_count;  // number of occurrences in the tree
 	uint_t rep_count;  // number of repetitions (1 = repeated)
-	uint_t dup_count;  // total number of occurences (= pos_count + tree_count)
+	uint_t dup_count;  // total number of occurrences (= pos_count + tree_count)
 
-	uchar_t keep;   // define this symbol in the dictionary
+	uchar_t keep;   // define in the dictionary
 	uint_t  index;  // index in the dictionary
-	uint_t  len;    // length of symbol when defined or used
-	uint    pass;   // pass number that discarded this symbol
+	uint_t  len;    // definition length
+	uint    pass;   // optimization pass number that discarded this symbol
+	uint    level;  // level in symbol tree
+	uint    order;  // order in the tree walk
+
+	uchar keep_fit;
+	uint  len_fit;
+
+	uint cost_first;  // cost to use first time
+	uint cost_next;   // cost to use next time
 
 	int tree_gain;  // gain in tree when defined
 	int pos_gain;   // gain in frame when defined
@@ -41,6 +51,13 @@ typedef struct symbol_s symbol_t;
 
 extern list_t sym_root;
 extern uint_t sym_count;
+
+#define LEVEL_MAX 256
+
+extern list_t levels [LEVEL_MAX];
+extern uint_t level_count;
+
+extern uint keep_count;
 
 
 // Pair definitions
@@ -63,6 +80,7 @@ typedef struct pair_s pair_t;
 struct position_s
 	{
 	list_t node;  // must be the first member
+	list_t node_hole;  // list of positions without pair
 
 	uint_t base;
 
@@ -73,26 +91,14 @@ struct position_s
 typedef struct position_s position_t;
 
 extern list_t pos_root;
-extern uint_t pos_count;
-
-
-// Hole definitions
-
-struct hole_s
-	{
-	list_t node;  // must be the first member
-
-	position_t * pos;
-	};
-
-typedef struct hole_s hole_t;
+extern uint_t pos_count;  // list of positions
 
 
 // Kind of sorting
 
-#define SORT_ALL 0  // sort by impact (occurences * size)
+#define SORT_ALL 0  // sort by impact (occurrences * size)
 #define SORT_REP 1  // filter repeat out
-#define SORT_DUP 2  // sort by occurences
+#define SORT_DUP 2  // sort by occurrences
 
 struct index_sym_s
 	{
@@ -114,7 +120,7 @@ extern uint_t index_count;
 
 // Global functions
 
-symbol_t * sym_add ();
+symbol_t * sym_add (uint level);
 uint_t sym_sort (uint_t kind);
 void sym_list (uint_t filter);
 
@@ -125,5 +131,7 @@ void scan_base ();
 void crunch_word ();
 void crunch_rep ();
 
+uint sym_order (symbol_t * sym, uint order);
+void sym_cost (symbol_t * sym, uint bit_len);
 
 //------------------------------------------------------------------------------

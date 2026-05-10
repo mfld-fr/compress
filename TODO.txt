@@ -1,16 +1,23 @@
 TODO LIST
 
-Needed:
-- quick sort on list ?
+Cleanup:
+- Move each algo to its own file
+- Factorize SE and SI code
+- Rename 'dup' to 'used'
+- Rename 'sym_count' to 'tree_count'
 
 Improvements:
 - encoding option
-- precompute definition length before serializing ?
 - merge table and sequence in RS (= RSI)
 - repeat symbol in tree
-- coding cost computation
-- self optimization based on cost
 - automatic benchmarking
+
+To explore:
+- replace length by 1 bit prefix in definition
+- prefixed encoding parameter
+- prefixed encoding cost optimization
+- repeat count as symbol ?
+- length value as symbol ?
 
 Huffman coding experiment:
 - binary tree structure

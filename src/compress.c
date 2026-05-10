@@ -204,7 +204,7 @@ static void expand_pb ()
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
-		symbol_t * sym = sym_add ();
+		symbol_t * sym = sym_add (0);
 		sym->code = in_code (8);
 		index->sym = sym;
 		}
@@ -305,7 +305,7 @@ static void expand_rpb ()
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
-		symbol_t * sym = sym_add ();
+		symbol_t * sym = sym_add (0);
 		sym->code = in_code (8);
 		index->sym = sym;
 		}
@@ -460,52 +460,6 @@ static void walk_def_out (symbol_t * sym, uchar_t bit_len)
 	}
 
 
-static void walk_sym_i (symbol_t * sym, uchar_t bit_len);
-
-static void walk_child_i (symbol_t * sym, uchar_t bit_len)
-	{
-	if (sym->size == 1 || (sym->sym_count == 1 && sym->pos_count == 0 && sym->rep_count != 1))
-		{
-		walk_sym_i (sym, bit_len);
-		}
-	else
-		{
-		if (!sym->len)
-			{
-			out_bit (1);  // definition
-			out_bit (0);
-
-			out_pref_odd (walk_sym_len (sym) - 2);
-			walk_sym_i (sym, bit_len);
-
-			sym->index = index_count++;
-			}
-		else
-			{
-			out_bit (1);  // reference
-			out_bit (1);
-
-			out_code (sym->index, bit_len);
-			}
-		}
-	}
-
-
-static void walk_sym_i (symbol_t * sym, uchar_t bit_len)
-	{
-	if (sym->size == 1)
-		{
-		out_bit (0);  // code
-		out_code (sym->code, 8);
-		}
-	else
-		{
-		walk_child_i (sym->left,  bit_len);
-		walk_child_i (sym->right, bit_len);
-		}
-	}
-
-
 // Walk the element tree
 
 #define PATTERN_MAX (32768)
@@ -577,7 +531,8 @@ static void compress_se ()
 				{
 				uint_t cost0 = walk_def_cost (sym, bit_len);
 				uint_t cost1 = cost0;
-				if (sym->len > 1) cost1 += cost_pref_odd (sym->len);
+				if (sym->len > 1) cost1 += cost_pref_odd (sym->len - 1);
+				// Reference prefix is '1'
 				sym->tree_gain = cost0 * sym->sym_count - cost1 - (1 + bit_len) * sym->sym_count;
 				tree_cost += cost1;
 				}
@@ -754,6 +709,59 @@ static void expand_se ()
 	}
 
 
+static void child_out (symbol_t * sym, uchar_t bit_len);
+
+static void sym_out (symbol_t * sym, uchar_t bit_len)
+	{
+	if (sym->keep)
+		{
+		if (sym->pass == 0)
+			{
+			sym->pass = 1;
+
+			// First use : output definition
+
+			out_bit (1);
+			out_bit (0);
+
+			if (sym->len > 1) out_pref_odd (sym->len - 1);
+			child_out (sym, bit_len);
+
+			sym->index = index_count++;
+			}
+		else
+			{
+			// Next use : output reference
+
+			out_bit (1);
+			out_bit (1);
+
+			out_code (sym->index, bit_len);
+			}
+		}
+	else
+		{
+		child_out (sym, bit_len);
+		}
+	}
+
+static void child_out (symbol_t * sym, uchar_t bit_len)
+	{
+	if (sym->level == 0)
+		{
+		// Output base code
+
+		out_bit (0);
+		out_code (sym->code, 8);
+		}
+	else
+		{
+		sym_out (sym->left,  bit_len);
+		sym_out (sym->right, bit_len);
+		}
+	}
+
+
 // Compression with "symbol"
 // Embedded dictionary (internal)
 
@@ -761,20 +769,101 @@ static void compress_si ()
 	{
 	crunch_word ();
 
-	uint_t def_count = sym_sort (SORT_DUP);
-	uchar_t bit_len = log2u (def_count);
+	if (opt_sym)
+		{
+		sym_sort (SORT_DUP);
+		sym_list (LIST_ALL);
+		}
 
-	out_pref_odd (bit_len - 1);
-	out_pref_odd (pos_count - 1);
+	// Compute the symbols order from the position list
 
+	uint order = 1;
 	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
-		symbol_t * sym = pos->sym;
+		order = sym_order (pos->sym, order);
+		node = node->next;
+		}
 
-		walk_child_i (sym, bit_len);
+	// First consider that all the duplicated symbols are worth to keep
+	// and compute the number of bits needed to encode all that symbols
 
+	keep_count = filter_init ();
+	if (opt_verb) printf ("Symbols worth: %u\n\n", keep_count);
+	uchar bit_used = log2u (keep_count - 1);
+	uchar bit_fit = bit_used;
+
+	// Iterate on the number of bits down to 0 to get the best one
+
+	while (bit_used > 0)
+		{
+		if (opt_verb) printf ("Used bits: %u\n", bit_used);
+
+		// Iterate on the level from 0 (base) to top
+
+		keep_count = 0;
+
+		for (uint level = 0; level < level_count; level++)
+			{
+			// Iterate on each symbol in that level
+			// and compute its cost
+
+			list_t * node = levels [level].next;
+			while (node != &(levels [level]))
+				{
+				symbol_t * sym = structof (symbol_t, node_level, node);
+				sym_cost (sym, bit_used);
+				node = node->next;
+				}
+			}
+
+		uchar bit_need = log2u (keep_count - 1);
+
+		if (opt_verb)
+			{
+			printf ("Symbols kept: %u\n", keep_count);
+			printf ("Needed bits: %u\n\n", bit_need);
+			}
+
+		if (bit_need > bit_used) break;
+
+		// Save the best fit
+
+		bit_fit = bit_used;
+
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = (symbol_t *) node;  // node as first member
+			sym->keep_fit = sym->keep;
+			sym->len_fit = sym->len;
+			node = node->next;
+			}
+
+		bit_used--;
+		}
+
+	// Restore the best fit
+
+	node = sym_root.next;
+	while (node != &sym_root)
+		{
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+		sym->keep = sym->keep_fit;
+		sym->len = sym->len_fit;
+		node = node->next;
+		}
+
+	// Output the best fit
+
+	out_pref_odd (bit_fit - 1);
+
+	node = pos_root.next;
+	while (node != &pos_root)
+		{
+		position_t * pos = (position_t *) node;  // node as first member
+		sym_out (pos->sym, bit_fit);
 		node = node->next;
 		}
 
@@ -814,10 +903,17 @@ static uint_t in_elem (uchar_t bit_len)
 			uint_t base = size_out;
 			size = 0;
 
-			uint_t len = 2 + in_pref_odd ();
+			uint_t len = 1 + in_pref_odd ();
 
-			for (uint_t i = 0; i < len; i++)
-				size += in_elem (bit_len);
+			if (len == 1)
+				{
+				uchar_t code = in_code (8);
+				out_byte (code);
+				size = 1;
+				}
+			else
+				for (uint_t i = 0; i < len; i++)
+					size += in_elem (bit_len);
 
 			// Parent element created after child
 
@@ -835,11 +931,11 @@ static void expand_si ()
 	{
 	uchar_t bit_len = 1 + in_pref_odd ();
 
-	uint_t pos_count = 1 + in_pref_odd ();
-
-	for (uint_t p = 0; p < pos_count; p++)
+	while (1)
+		{
+		if (in_eof ()) break;
 		in_elem (bit_len);
-
+		}
 	}
 
 

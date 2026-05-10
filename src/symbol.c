@@ -7,6 +7,7 @@
 #include <error.h>
 #include <math.h>
 
+#include "common.h"
 #include "list.h"
 #include "stream.h"
 #include "symbol.h"
@@ -22,6 +23,11 @@ uint_t pos_count;
 
 index_sym_t index_sym [SYMBOL_MAX];
 uint_t index_count;
+
+list_t levels [LEVEL_MAX];
+uint_t level_count;
+
+uint keep_count;
 
 
 // Local data
@@ -41,7 +47,7 @@ static int sym_comp (const void * v1, const void * v2)
 	}
 
 
-symbol_t * sym_add ()
+symbol_t * sym_add (uint level)
 	{
 	if (sym_count >= SYMBOL_MAX)
 		error (1, 0, "too many symbols");
@@ -51,6 +57,18 @@ symbol_t * sym_add ()
 
 	list_add_tail (&sym_root, (list_t *) sym);  // node as first member
 	sym_count++;
+
+	// Add symbol to level list
+
+	if (level >= LEVEL_MAX)
+		error (1, 0, "too many levels");
+
+	list_add_tail (&levels [level], &sym->node_level);
+
+	sym->level = level;
+
+	if (level + 1 > level_count)
+		level_count = level + 1;
 
 	return sym;
 	}
@@ -147,7 +165,7 @@ void sym_list (uint_t filter)
 	double entropy = 0.0;
 	uint use_count = 0;
 
-	puts ("\nSYMBOLS");
+	puts ("SYMBOLS:");
 
 	for (uint_t i = 0; i < sym_count; i++)
 		{
@@ -156,7 +174,7 @@ void sym_list (uint_t filter)
 
 		if (filter == LIST_KEEP && !sym->keep) continue;
 
-		uint_t sym_dup = sym->pos_count + sym->sym_count;
+		uint_t sym_dup = sym->pos_count + sym->sym_count;  // TODO: replace by sym->dup_count
 		use_count += sym_dup;
 
 		double p = (double) sym_dup / (pos_count + sym_count);
@@ -178,15 +196,24 @@ void sym_list (uint_t filter)
 		}
 
 	printf ("\nEntropy: %f\n", entropy);
-	printf ("Limit: %f\n\n", entropy * use_count);
+	printf ("Core size: %u\n\n", (uint) (entropy * use_count / 8));
 	}
 
 
+// Add a position to the hole list
+
 static void hole_add (position_t * pos)
 	{
-	hole_t * hole = malloc (sizeof (hole_t));
-	hole->pos = pos;
-	list_add_tail (&hole_root, (list_t *) hole);  // node as first member
+	list_add_tail (&hole_root, &pos->node_hole);
+	}
+
+// Remove a position from the hole list
+
+static void hole_remove (position_t * pos)
+	{
+	list_remove (&pos->node_hole);
+	// Zero the node_hole to detect bad pointers
+	memset (&pos->node_hole, 0, sizeof (list_t));
 	}
 
 
@@ -196,8 +223,14 @@ void scan_base ()
 	{
 	list_init (&sym_root);
 	list_init (&pos_root);
-
 	list_init (&hole_root);
+
+	// Initialize the level array
+
+	for (int i = 0; i < LEVEL_MAX; i++)
+		list_init (&levels [i]);
+
+	// Initialize the symbol index
 
 	memset (index_sym, 0, sizeof (index_sym_t) * CODE_MAX);
 
@@ -210,7 +243,7 @@ void scan_base ()
 
 		if (!sym)
 			{
-			sym = sym_add ();
+			sym = sym_add (0);  // 0 for base level
 
 			sym->code = frame_in [i];
 			sym->base = i;
@@ -244,10 +277,10 @@ static void scan_pair ()
 	list_t * hole_left = hole_root.next;
 	while (hole_left != &hole_root)
 		{
-		position_t * pos_left = ((hole_t *) hole_left)->pos;  // node as first member
-		position_t * pos_left_next = (position_t *) (pos_left->node.next);
+		position_t * pos_left = structof (position_t, node_hole, hole_left);
+		position_t * pos_left_next = (position_t *) (pos_left->node.next);  // node as first member
 
-		// Add new pair
+		// Replace hole by a new pair
 
 		pair_t * pair = malloc (sizeof (pair_t));
 		list_add_tail (&pair_root, (list_t *) pair);  // node as first member
@@ -257,7 +290,7 @@ static void scan_pair ()
 		pair->left = pos_left->sym;
 		pair->right = pos_left_next->sym;
 
-		pos_left->pair = pair;  // pair now found there
+		pos_left->pair = pair;  // pair at position now
 
 		// Scan for pair duplicates
 
@@ -266,28 +299,23 @@ static void scan_pair ()
 			{
 			list_t * hole_right_next = hole_right->next;
 
-			position_t * pos_right = ((hole_t *) hole_right)->pos;  // node as first member
-			position_t * pos_right_next = (position_t *) (pos_right->node.next);
+			position_t * pos_right = structof (position_t, node_hole, hole_right);
+			position_t * pos_right_next = (position_t *) (pos_right->node.next);  // node as first member
 
 			if ((pair->left == pos_right->sym) &&
 				(pair->right == pos_right_next->sym))
 				{
 				pair->count++;
 
-				pos_right->pair = pair;  // pair now found there
-				list_remove (hole_right);
-				memset (hole_right, 0, sizeof (hole_t));  // invalidate pointers
-				free ((hole_t *) hole_right);  // node as first member
+				pos_right->pair = pair;  // pair at position now
+				hole_remove (pos_right);
 				}
 
-			hole_right = hole_right_next;
+			hole_right = hole_right_next;  // TODO: simplify
 			}
 
-		list_t * hole_left_next = hole_left->next;
-		list_remove (hole_left);
-		memset (hole_left, 0, sizeof (hole_t));  // invalidate pointers
-		free ((hole_t *) hole_left);  // node as first member
-		hole_left = hole_left_next;
+		hole_left = hole_left->next;
+		hole_remove (pos_left);
 		}
 	}
 
@@ -299,7 +327,8 @@ static void dec_pair (pair_t * pair)
 	if (!pair->count)
 		{
 		list_remove ((list_t *) pair);  // node as first member
-		memset (pair, 0, sizeof (pair_t));  // invalidate pointers
+		// Zero the pair to detect bad pointers
+		memset (pair, 0, sizeof (pair_t));
 		free (pair);
 		}
 	}
@@ -315,22 +344,22 @@ static int crunch_pair (pair_t * pair)
 
 	symbol_t * sym = NULL;
 
-	list_t * node = pos_root.next;
 	list_t * node_prev = &pos_root;
+	list_t * node_left = pos_root.next;
+	list_t * node_right = node_left->next;
+	list_t * node_next = node_right->next;
 
-	while ((node != pos_root.prev) && (node != &pos_root))
+	while (1)
 		{
-		list_t * node_next = node->next;
-
-		position_t * pos = (position_t *) node;  // node as first member
-		if (pos->pair == pair)
+		position_t * pos_left = (position_t *) node_left;  // node as first member
+		if (pos_left->pair == pair)
 			{
-			// Consider previous pair
+			// Consider previous pair if any
 
 			if (node_prev != &pos_root)
 				{
 				position_t * pos_prev = (position_t *) node_prev;  // node as first member
-				if (pos_prev->pair)  // can be the pair just processed before
+				if (pos_prev->pair)
 					{
 					dec_pair (pos_prev->pair);
 					pos_prev->pair = NULL;
@@ -338,14 +367,17 @@ static int crunch_pair (pair_t * pair)
 					}
 				}
 
-			// Consider next pair
+			// Consider next pair if any
 
-			if ((node_next != pos_root.prev) && (node_next != &pos_root))
+			if (node_next != &pos_root)
 				{
-				position_t * pos_next = (position_t *) node_next;  // node as first member
-				dec_pair (pos_next->pair);
-				pos_next->pair = NULL;
-				//hole_add (pos_next);  // position will be crunched later
+				position_t * pos_right = (position_t *) node_right;  // node as first member
+				if (pos_right->pair)
+					{
+					dec_pair (pos_right->pair);
+					pos_right->pair = NULL;   // position will be crunched later
+					// hole_add (pos_right);  // position will be crunched later
+					}
 				}
 
 			// Replace current pair by new symbol
@@ -355,9 +387,11 @@ static int crunch_pair (pair_t * pair)
 
 			if (!sym)
 				{
-				sym = sym_add ();
+				uint level = 1 + (sym_left->level > sym_right->level ? sym_left->level : sym_right->level);
 
-				sym->base = pos->base;
+				sym = sym_add (level);
+
+				sym->base = pos_left->base;
 				sym->size = sym_left->size + sym_right->size;
 
 				sym->left = sym_left;
@@ -371,26 +405,39 @@ static int crunch_pair (pair_t * pair)
 			sym_right->pos_count--;
 			sym->pos_count++;
 
-			pos->sym = sym;
+			pos_left->sym = sym;
 
 			dec_pair (pair);
-			pos->pair = NULL;
-			hole_add (pos);
+			pos_left->pair = NULL;
 
-			// Shift frame end to left
+			if (node_next != &pos_root)
+				hole_add (pos_left);
 
-			list_t * node_after = node_next->next;
-			list_remove (node_next);
-			free ((position_t *) node_next);  // node as first member
-			node_next = node_after;
+			// Shift end of the frame to the left
 
+			list_remove (node_right);
+			free ((position_t *) node_right);  // node as first member
+			node_right = NULL;
 			pos_count--;
-
 			shrink = 1;
+
+			if (node_next == &pos_root) break;
+			node_prev = node_left;
+			node_left = node_next;
+			node_right = node_left->next;
+			if (node_right == &pos_root) break;
+			node_next = node_right->next;
 			}
 
-		node_prev = node;
-		node = node_next;
+		else
+			{
+			if (node_next == &pos_root) break;
+			list_t * node = node_next->next;
+			node_prev = node_left;
+			node_left = node_right;
+			node_right = node_next;
+			node_next = node;
+			}
 		}
 
 	return shrink;
@@ -424,10 +471,9 @@ void crunch_word ()
 
 			if (pair->left != pair->right)
 				{
-				uint_t count = pair->count;
-				if (count > count_max)
+				if (pair->count > count_max)
 					{
-					count_max = count;
+					count_max = pair->count;
 					pair_max = pair;
 					}
 				}
@@ -470,7 +516,8 @@ void crunch_rep ()
 				dec_pair (pos_left->pair);
 				pos_left->pair = NULL;
 
-				sym_rep = sym_add ();
+				uint level = 1 + sym_left->level;
+				sym_rep = sym_add (level);
 
 				pos_left->sym = sym_rep;
 				sym_rep->pos_count = 1;
@@ -509,4 +556,81 @@ void crunch_rep ()
 	}
 
 
+// Walk the symbol tree to compute symbol usage order
+
+uint sym_order (symbol_t * sym, uint order)
+	{
+	if (sym->order) return order;  // skip if already set earlier
+
+	sym->order = order++;
+	if (sym->level == 0) return order;
+
+	if (sym->left) order = sym_order (sym->left, order);
+	if (sym->right) order = sym_order (sym->right, order);
+	return order;
+	}
+
+
+// Compute symbol cost and decide whether to keep or drop it
+
+void sym_cost (symbol_t * sym, uint bit_len)
+	{
+	uint cost_use;
+	uint cost_def;
+	uint cost_ref = 2 + bit_len;  // 2 bits for reference prefix '11'
+
+	if (sym->level == 0)
+		{
+		// Base symbol
+
+		sym->len = 1;
+		cost_use = 1 + 8;
+		cost_def =  2 + cost_use;
+		}
+	else
+		{
+		// Derived symbol
+
+		sym->len = sym->left->keep ? 1 : sym->left->len;
+		sym->len += sym->right->keep ? 1 : sym->right->len;
+
+		uint cost = (sym->left->order > sym->order) ? sym->left->cost_first : sym->left->cost_next;
+		cost += (sym->right->order > sym->order) ? sym->right->cost_first : sym->right->cost_next;
+
+		cost_use = cost;
+		cost_def = 2 + cost_pref_odd (sym->len - 1) + cost;
+		}
+
+	// Consider both costs whenever kept or not
+
+	uint cost_drop = sym->dup_count * cost_use;
+	uint cost_keep = cost_def + (sym->dup_count -1) * cost_ref;
+	int cost_gain = cost_drop - cost_keep;
+
+	// Keep or drop the symbol according to the cost gain
+
+	if (cost_gain <= 0)
+		{
+		sym->keep = 0;
+		sym->cost_first = cost_use;
+		sym->cost_next = cost_use;
+
+		// FIXME: dropping a derived symbol causes more children usage
+		// so have to update the duplicate count of the children first
+		// then to restart cost computation & selection one level down
+		if ((sym->level) > 0 && (sym->dup_count > 1))
+			{
+			// printf ("Missing code at %s(%u)\n", __FILE__, __LINE__);
+			}
+		}
+	else
+		{
+		sym->keep = 1;
+		sym->cost_first = cost_def;
+		sym->cost_next = cost_ref;
+		keep_count++;
+		}
+	}
+
 //------------------------------------------------------------------------------
+
