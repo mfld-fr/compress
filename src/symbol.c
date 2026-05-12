@@ -47,7 +47,7 @@ static int sym_comp (const void * v1, const void * v2)
 	}
 
 
-symbol_t * sym_add (uint level)
+symbol_t * sym_add ()
 	{
 	if (sym_count >= SYMBOL_MAX)
 		error (1, 0, "too many symbols");
@@ -57,6 +57,12 @@ symbol_t * sym_add (uint level)
 
 	list_add_tail (&sym_root, (list_t *) sym);  // node as first member
 	sym_count++;
+	return sym;
+	}
+
+symbol_t * sym_ins (uint level)
+	{
+	symbol_t * sym = sym_add ();
 
 	// Add symbol to level list
 
@@ -77,20 +83,23 @@ symbol_t * sym_add (uint level)
 // Build index and sort
 // TODO: build key in callback
 
-uint_t sym_sort (uint_t kind)
+void sym_sort (uint_t kind)
 	{
 	list_t * node = sym_root.next;
-	for (uint_t i = 0; i < sym_count; i++)
+	for (uint_t i = 0; i < sym_count; i++)  // TODO: replace by list
 		{
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		sym->dup_count = sym->sym_count + sym->pos_count;
+		sym->dup_count = sym->pos_count + sym->tree_count;
 
 		switch (kind)
 			{
 			case SORT_ALL:
-				index->key = sym->dup_count + (sym->rep_count > 1 ? sym->rep_count : 0) * sym->size;
+				if (sym->rep_count > 1)
+					index->key = sym->rep_count * sym->size;
+				else
+					index->key = sym->dup_count * sym->size;
 				break;
 
 			case SORT_REP:
@@ -126,14 +135,12 @@ uint_t sym_sort (uint_t kind)
 		symbol_t * sym = index->sym;
 		sym->index = i;
 		}
-
-	return 0;
 	}
 
 
-// Initial symbol filtering
+// Initial symbol keep or drop choice
 
-uint_t filter_init ()
+uint_t keep_init ()
 	{
 	uint_t filt_count = 0;
 
@@ -142,10 +149,10 @@ uint_t filter_init ()
 		{
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		sym->dup_count = sym->pos_count + sym->sym_count;
-		if (sym->dup_count > 1)
+		sym->dup_count = sym->pos_count + sym->tree_count;
+		if (sym->dup_count > 1 || (sym->rep_count == 1 && sym->level > 0))
 			{
-			// Duplicated symbols are presumed valuable
+			// Duplicated or repeated symbols are presumed valuable
 			// until cost computation confirms or not
 			sym->keep = 1;
 			filt_count++;
@@ -174,7 +181,7 @@ void sym_list (uint_t filter)
 
 		if (filter == LIST_KEEP && !sym->keep) continue;
 
-		uint_t sym_dup = sym->pos_count + sym->sym_count;  // TODO: replace by sym->dup_count
+		uint_t sym_dup = sym->pos_count + sym->tree_count;  // TODO: replace by sym->dup_count
 		use_count += sym_dup;
 
 		double p = (double) sym_dup / (pos_count + sym_count);
@@ -192,7 +199,7 @@ void sym_list (uint_t filter)
 		else
 			printf (" pos=%u", sym->pos_count);
 
-		printf (" tree=%u\n", sym->sym_count);
+		printf (" tree=%u\n", sym->tree_count);
 		}
 
 	printf ("\nEntropy: %f\n", entropy);
@@ -243,7 +250,7 @@ void scan_base ()
 
 		if (!sym)
 			{
-			sym = sym_add (0);  // 0 for base level
+			sym = sym_ins (0);  // 0 for base level
 
 			sym->code = frame_in [i];
 			sym->base = i;
@@ -389,16 +396,16 @@ static int crunch_pair (pair_t * pair)
 				{
 				uint level = 1 + (sym_left->level > sym_right->level ? sym_left->level : sym_right->level);
 
-				sym = sym_add (level);
+				sym = sym_ins (level);
 
 				sym->base = pos_left->base;
 				sym->size = sym_left->size + sym_right->size;
 
 				sym->left = sym_left;
-				sym_left->sym_count++;
+				sym_left->tree_count++;
 
 				sym->right = sym_right;
-				sym_right->sym_count++;
+				sym_right->tree_count++;
 				}
 
 			sym_left->pos_count--;
@@ -413,7 +420,7 @@ static int crunch_pair (pair_t * pair)
 			if (node_next != &pos_root)
 				hole_add (pos_left);
 
-			// Shift end of the frame to the left
+			// Shift frame end to the left
 
 			list_remove (node_right);
 			free ((position_t *) node_right);  // node as first member
@@ -502,22 +509,20 @@ void crunch_rep ()
 		symbol_t * sym_rep = NULL;
 
 		list_t * node_right = node_left->next;
-		while (1)
+		while (node_right != &pos_root)
 			{
-			if (node_right == &pos_root) break;
-
 			position_t * pos_right = (position_t *) node_right;  // node as first member
-			if (sym_left != pos_right->sym) break;
+			symbol_t * sym_right = pos_right->sym;
+			if (sym_left != sym_right) break;
 
 			// Replace current symbol by repeat
 
 			if (!sym_rep)
 				{
-				dec_pair (pos_left->pair);
+				if (pos_left->pair) dec_pair (pos_left->pair);
 				pos_left->pair = NULL;
 
-				uint level = 1 + sym_left->level;
-				sym_rep = sym_add (level);
+				sym_rep = sym_add ();
 
 				pos_left->sym = sym_rep;
 				sym_rep->pos_count = 1;
@@ -526,27 +531,27 @@ void crunch_rep ()
 				sym_rep->rep_count = 1;
 				sym_left->rep_count = 1;  // repeated
 
-				sym_rep->base = pos_left->base;
 				sym_rep->size = sym_left->size;
 
 				sym_rep->left = sym_left;
-				sym_left->sym_count++;
+				sym_left->tree_count++;
 				}
 
-			sym_left->pos_count--;
+			sym_right->pos_count--;
 
 			sym_rep->rep_count++;
+			sym_rep->size += sym_right->size;
 
-			dec_pair (pos_right->pair);
-			pos_right->pair = NULL;
-			pos_right->sym = NULL;
+			if (pos_right->pair) dec_pair (pos_right->pair);
+			//pos_right->pair = NULL;  // position will be crunched later
+			//pos_right->sym = NULL;  // position will be crunched later
 
-			// Shift frame end to left
+			// Shift frame end to the left
 
-			list_t * node_after = node_right->next;
+			list_t * node_next = node_right->next;
 			list_remove (node_right);
-			free ((position_t *) node_right);  // node as first member
-			node_right = node_after;
+			free (pos_right);
+			node_right = node_next;
 
 			pos_count--;
 			}

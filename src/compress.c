@@ -90,8 +90,6 @@ static void compress_rb ()
 	{
 	crunch_rep ();
 
-	out_pref_odd (pos_count - 1);
-
 	list_t * node = pos_root.next;
 	while (node != &pos_root)
 		{
@@ -125,9 +123,7 @@ static void compress_rb ()
 
 static void expand_rb ()
 	{
-	uint_t count = 1 + in_pref_odd ();
-
-	for (uint_t p = 0; p < count; p++)
+	while (!in_eof ())
 		{
 		if (!in_bit ())  // code flag
 			{
@@ -148,7 +144,7 @@ static void expand_rb ()
 
 static void compress_pb ()
 	{
-	if (!opt_sym) sym_sort (SORT_ALL);
+	sym_sort (SORT_DUP);
 
 	// No more than 6 prefixed bits to save space
 	// so no more than 14 indexed symbols
@@ -204,7 +200,7 @@ static void expand_pb ()
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
-		symbol_t * sym = sym_add (0);
+		symbol_t * sym = sym_add ();
 		sym->code = in_code (8);
 		index->sym = sym;
 		}
@@ -235,12 +231,12 @@ static void compress_rpb ()
 	{
 	crunch_rep ();
 
-	uint_t count = sym_sort (SORT_REP);
+	sym_sort (SORT_REP);
 
 	// No more than 6 prefixed bits to save space
 	// so no more than 14 indexed symbols
 
-	count = (count < 14) ? count : 14;
+	uint count = (sym_count < 14) ? sym_count : 14;
 
 	out_pref_odd (count - 1);
 
@@ -305,7 +301,7 @@ static void expand_rpb ()
 	for (uint_t i = 0; i < count; i++)
 		{
 		index_sym_t * index = index_sym + i;
-		symbol_t * sym = sym_add (0);
+		symbol_t * sym = sym_add ();
 		sym->code = in_code (8);
 		index->sym = sym;
 		}
@@ -507,9 +503,9 @@ static void compress_se ()
 		sym_list (LIST_ALL);
 		}
 
-	// Initial symbol filtering
+	// Initial symbol keep or drop choice
 
-	uint_t def_count = filter_init ();
+	uint_t def_count = keep_init ();
 	uchar_t bit_len;
 
 	uint min_cost = UINT_MAX;
@@ -533,7 +529,7 @@ static void compress_se ()
 				uint_t cost1 = cost0;
 				if (sym->len > 1) cost1 += cost_pref_odd (sym->len - 1);
 				// Reference prefix is '1'
-				sym->tree_gain = cost0 * sym->sym_count - cost1 - (1 + bit_len) * sym->sym_count;
+				sym->tree_gain = cost0 * sym->tree_count - cost1 - (1 + bit_len) * (sym->tree_count - 1);
 				tree_cost += cost1;
 				}
 
@@ -789,7 +785,7 @@ static void compress_si ()
 	// First consider that all the duplicated symbols are worth to keep
 	// and compute the number of bits needed to encode all that symbols
 
-	keep_count = filter_init ();
+	keep_count = keep_init ();
 	if (opt_verb) printf ("Symbols worth: %u\n\n", keep_count);
 	uchar bit_used = log2u (keep_count - 1);
 	uchar bit_fit = bit_used;
@@ -947,23 +943,49 @@ static void compress_rse ()
 	crunch_word ();
 	crunch_rep ();
 
-	uint_t count = sym_sort (SORT_DUP);
-	uchar_t len = log2u (count);
+	if (opt_sym)
+		{
+		sym_sort (SORT_REP);
+		sym_list (LIST_ALL);
+		}
+
+	uint count = keep_init ();
+	uchar_t bit_len = log2u (count);
+
+	// Index the symbols
+
+	uint_t index = 0;
+	list_t * node = sym_root.next;
+	while (node != &sym_root)
+		{
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+		if (sym->keep) sym->index = index++;
+		node = node->next;
+		}
+
+	// Output the dictionary
 
 	out_pref_odd (count - 1);
 
-	for (uint_t i = 0; i < count; i++)
+	node = sym_root.next;
+	while (node != &sym_root)
 		{
-		index_sym_t * index = index_sym + i;
-		symbol_t * sym = index->sym;
+		symbol_t * sym = (symbol_t *) node;  // node as first member
+		if (sym->keep)
+			{
+			uint_t len = walk_sym_len (sym);
+			// TODO: same optimization as SE
+			//if (len > 1) out_pref_odd (len - 1);
+			out_pref_odd (len - 1);
+			walk_def_out (sym, bit_len);
+			}
 
-		out_pref_odd (walk_sym_len (sym) - 2);
-		walk_def_out (sym, len);
+		node = node->next;
 		}
 
 	out_pref_odd (pos_count - 1);
 
-	list_t * node = pos_root.next;
+	node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
@@ -985,7 +1007,7 @@ static void compress_rse ()
 			out_bit (0);  // no repeat
 			}
 
-		walk_use_out (sym, len);
+		walk_use_out (sym, bit_len);
 
 		node = node->next;
 		}
@@ -1006,7 +1028,7 @@ static void expand_rse ()
 		{
 		elem_t * elem = elements + i;
 
-		uint_t size = 2 + in_pref_odd ();
+		uint_t size = 1 + in_pref_odd ();
 
 		elem->size = size;
 		elem->base = patt_len;

@@ -4,36 +4,53 @@ PROG = Release/compress
 
 .PHONY: test
 
-# Test the SE algorithm
+# Macro to test a file
+# $(1): algorithm name
+# $(2): input file
+define TEST_FILE
+	echo "Testing $(1) algo on $(2)"
+	$(PROG) -c -m $(1) $(2) test_out.bin
+	$(PROG) -e -m $(1) test_out.bin test_in.bin
+	diff $(2) test_in.bin
+	du -b $(2) test_out.bin
+endef
 
+# Macro to test a compression algorithm
+# $(1) = algorithm name (se or si)
+define TEST_ALGO
+	echo "Testing $(1) algorithm"
+	$(call TEST_FILE,$(1),data.bin)
+	$(call TEST_FILE,$(1),code.bin)
+	$(call TEST_FILE,$(1),ash.bin)
+	echo
+endef
+
+# Test the B algorithm
+test_b:
+	$(call TEST_ALGO,b)
+
+# Test the RB algorithm
+test_rb:
+	$(call TEST_ALGO,rb)
+
+# Test the PB algorithm
+test_pb:
+	$(call TEST_ALGO,pb)
+
+# Test the RPB algorithm
+test_rpb:
+	$(call TEST_ALGO,rpb)
+
+# Test the SE algorithm
 test_se:
-	$(PROG) -c -m se data.bin test_out.bin
-	$(PROG) -e -m se test_out.bin test_in.bin
-	diff data.bin test_in.bin
-	du -b data.bin test_out.bin
-	$(PROG) -c -m se code.bin test_out.bin
-	$(PROG) -e -m se test_out.bin test_in.bin
-	diff code.bin test_in.bin
-	du -b code.bin test_out.bin
-	$(PROG) -c -m se ash.bin test_out.bin
-	$(PROG) -e -m se test_out.bin test_in.bin
-	diff ash.bin test_in.bin
-	du -b ash.bin test_out.bin
+	$(call TEST_ALGO,se)
 
 # Test the SI algorithm
-
 test_si:
-	$(PROG) -c -m si data.bin test_out.bin
-	$(PROG) -e -m si test_out.bin test_in.bin
-	diff data.bin test_in.bin
-	du -b data.bin test_out.bin
-	$(PROG) -c -m si code.bin test_out.bin
-	$(PROG) -e -m si test_out.bin test_in.bin
-	diff code.bin test_in.bin
-	du -b code.bin test_out.bin
-	$(PROG) -c -m si ash.bin test_out.bin
-	$(PROG) -e -m si test_out.bin test_in.bin
-	diff ash.bin test_in.bin
-	du -b ash.bin test_out.bin
+	$(call TEST_ALGO,si)
 
-test: test_se test_si
+# Test the RSE algorithm
+test_rse:
+	$(call TEST_ALGO,rse)
+
+test: test_b test_rb test_pb test_rpb test_se test_si test_rse

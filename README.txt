@@ -5,14 +5,11 @@ for best performance and portability.
 
 The compressor is intended to run on a host with standard resources (development
 PC). The decompressor is in turn intended to run on a target with limited
-resources (embedded, IoT).
+resources (embedded).
 
 The main goal is to save storage space on the target, by compressing at most the
-read-only data on the host, and to decompress on the target at the lowest cost,
-for a limited impact on the load time.
-
-A secondary goal is to compress and decompress on the target some limited amount
-of read-write data, keeping the lowest cost but having a valuable ratio.
+read-only data on the host, and to decompress it on the target at the lowest
+cost, with a limited impact on the load time.
 
 Inspired by the famous & venerable Exomizer:
 https://github.com/bitshifters/exomizer
@@ -21,9 +18,9 @@ https://github.com/bitshifters/exomizer
 DESIGN
 
 Because of small data sizes on the target, compression is performed on the
-whole initial sequence of base symbols (= characters as byte codes). This gives
-a better symbol ratio, but requires more computation than the algorithms using
-a sliding window (these are better suited for long data streams).
+whole initial sequence of base symbols (as byte codes). This gives a better
+symbol ratio, but requires more computation than the algorithms using a
+sliding window (these are better suited for long data streams).
 
 The compressor repeatedly scans the sequence to find elementary patterns as
 symbol pairs, then replaces the most frequent & asymmetric pair by a secondary
@@ -51,13 +48,12 @@ STATUS
 WORK IN PROGRESS
 
 Already implemented:
-- symbol listing
+- symbol sorting & listing
 - asymmetric pairing
 - repeated symbol in sequence
 - tree walking
 - bit coding & streaming
 - encoding cost computation
-- external loopback test
 
 Result:
 - already good symbol ratio
@@ -83,7 +79,7 @@ ENCODING     DATA  CODE   ASH
 
 Initial      6151  43584  51216
 B(ase)       6151  43584  51216   Just for testing
-R(epeat)B    5650  48716  55948   Not efficient for code
+R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4835  31821  38006
@@ -108,8 +104,8 @@ B(ase)      6         2
 R(epeat)B   -         -
 P(refix)B   9         3
 RPB         -         -
-S(ymbol)E   3885      6
-SI          2240      2
+S(ymbol)E   3719      6
+SI          1721      2
 RSE         2395      2
 RSI         x         x
 PS          x         x

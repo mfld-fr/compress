@@ -11,14 +11,13 @@
 
 struct symbol_s
 	{
-	list_t node;  // must be the first member
-	//list_t kept;
-	list_t node_level;
+	list_t node;        // must be the first member
+	list_t node_level;  // list of symbol at same tree level
 
-	uint_t pos_count;  // number of occurrences in the frame
-	uint_t sym_count;  // number of occurrences in the tree
-	uint_t rep_count;  // number of repetitions (1 = repeated)
-	uint_t dup_count;  // total number of occurrences (= pos_count + tree_count)
+	uint_t pos_count;   // number of occurrences in the frame
+	uint_t tree_count;  // number of occurrences in the tree
+	uint_t rep_count;   // number of repetitions
+	uint_t dup_count;   // total number of occurrences (= pos_count + tree_count)
 
 	uchar_t keep;   // define in the dictionary
 	uint_t  index;  // index in the dictionary
@@ -120,11 +119,13 @@ extern uint_t index_count;
 
 // Global functions
 
-symbol_t * sym_add (uint level);
-uint_t sym_sort (uint_t kind);
+symbol_t * sym_add ();
+symbol_t * sym_ins (uint level);
+
+void sym_sort (uint_t kind);
 void sym_list (uint_t filter);
 
-uint_t filter_init ();
+uint_t keep_init ();
 
 void scan_base ();
 

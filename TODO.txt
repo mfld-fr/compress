@@ -2,11 +2,11 @@ TODO LIST
 
 Cleanup:
 - Move each algo to its own file
-- Factorize SE and SI code
-- Rename 'dup' to 'used'
-- Rename 'sym_count' to 'tree_count'
+- Rename 'dup_count' to 'use_count'
 
 Improvements:
+- more accurate timing with dedicated option -t
+- Factorize SE and SI code
 - encoding option
 - merge table and sequence in RS (= RSI)
 - repeat symbol in tree
@@ -18,6 +18,8 @@ To explore:
 - prefixed encoding cost optimization
 - repeat count as symbol ?
 - length value as symbol ?
+- definition header as symbol ?
+- repeat header as symbol ?
 
 Huffman coding experiment:
 - binary tree structure
