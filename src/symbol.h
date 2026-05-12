@@ -12,7 +12,6 @@
 struct symbol_s
 	{
 	list_t node;        // must be the first member
-	list_t node_level;  // list of symbol at same tree level
 
 	uint_t pos_count;   // number of occurrences in the frame
 	uint_t tree_count;  // number of occurrences in the tree
@@ -22,8 +21,7 @@ struct symbol_s
 	uchar_t keep;   // define in the dictionary
 	uint_t  index;  // index in the dictionary
 	uint_t  len;    // definition length
-	uint    pass;   // optimization pass number that discarded this symbol
-	uint    level;  // level in symbol tree
+	uint    pass;   // walk flag
 	uint    order;  // order in the tree walk
 
 	uchar keep_fit;
@@ -50,11 +48,6 @@ typedef struct symbol_s symbol_t;
 
 extern list_t sym_root;
 extern uint_t sym_count;
-
-#define LEVEL_MAX 256
-
-extern list_t levels [LEVEL_MAX];
-extern uint_t level_count;
 
 extern uint keep_count;
 
@@ -120,7 +113,6 @@ extern uint_t index_count;
 // Global functions
 
 symbol_t * sym_add ();
-symbol_t * sym_ins (uint level);
 
 void sym_sort (uint_t kind);
 void sym_list (uint_t filter);

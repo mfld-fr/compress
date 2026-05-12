@@ -24,9 +24,6 @@ uint_t pos_count;
 index_sym_t index_sym [SYMBOL_MAX];
 uint_t index_count;
 
-list_t levels [LEVEL_MAX];
-uint_t level_count;
-
 uint keep_count;
 
 
@@ -55,30 +52,10 @@ symbol_t * sym_add ()
 	symbol_t * sym = malloc (sizeof (symbol_t));
 	memset (sym, 0, sizeof (symbol_t));
 
-	list_add_tail (&sym_root, (list_t *) sym);  // node as first member
+	list_add_tail (&sym_root, &sym->node);
 	sym_count++;
 	return sym;
 	}
-
-symbol_t * sym_ins (uint level)
-	{
-	symbol_t * sym = sym_add ();
-
-	// Add symbol to level list
-
-	if (level >= LEVEL_MAX)
-		error (1, 0, "too many levels");
-
-	list_add_tail (&levels [level], &sym->node_level);
-
-	sym->level = level;
-
-	if (level + 1 > level_count)
-		level_count = level + 1;
-
-	return sym;
-	}
-
 
 // Build index and sort
 // TODO: build key in callback
@@ -150,7 +127,7 @@ uint_t keep_init ()
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
 		sym->dup_count = sym->pos_count + sym->tree_count;
-		if (sym->dup_count > 1 || (sym->rep_count == 1 && sym->level > 0))
+		if (sym->dup_count > 1 || (sym->rep_count == 1 && sym->size > 1))
 			{
 			// Duplicated or repeated symbols are presumed valuable
 			// until cost computation confirms or not
@@ -232,11 +209,6 @@ void scan_base ()
 	list_init (&pos_root);
 	list_init (&hole_root);
 
-	// Initialize the level array
-
-	for (int i = 0; i < LEVEL_MAX; i++)
-		list_init (&levels [i]);
-
 	// Initialize the symbol index
 
 	memset (index_sym, 0, sizeof (index_sym_t) * CODE_MAX);
@@ -250,7 +222,7 @@ void scan_base ()
 
 		if (!sym)
 			{
-			sym = sym_ins (0);  // 0 for base level
+			sym = sym_add ();
 
 			sym->code = frame_in [i];
 			sym->base = i;
@@ -260,7 +232,7 @@ void scan_base ()
 			}
 
 		position_t * pos = malloc (sizeof (position_t));
-		list_add_tail (&pos_root, (list_t *) pos);  // node as first member
+		list_add_tail (&pos_root, &pos->node);
 
 		pos->base = i;
 		pos->sym = sym;
@@ -290,7 +262,7 @@ static void scan_pair ()
 		// Replace hole by a new pair
 
 		pair_t * pair = malloc (sizeof (pair_t));
-		list_add_tail (&pair_root, (list_t *) pair);  // node as first member
+		list_add_tail (&pair_root, &pair->node);
 
 		pair->count = 1;
 
@@ -394,9 +366,7 @@ static int crunch_pair (pair_t * pair)
 
 			if (!sym)
 				{
-				uint level = 1 + (sym_left->level > sym_right->level ? sym_left->level : sym_right->level);
-
-				sym = sym_ins (level);
+				sym = sym_add ();
 
 				sym->base = pos_left->base;
 				sym->size = sym_left->size + sym_right->size;
@@ -568,7 +538,7 @@ uint sym_order (symbol_t * sym, uint order)
 	if (sym->order) return order;  // skip if already set earlier
 
 	sym->order = order++;
-	if (sym->level == 0) return order;
+	if (sym->size == 1) return order;
 
 	if (sym->left) order = sym_order (sym->left, order);
 	if (sym->right) order = sym_order (sym->right, order);
@@ -584,7 +554,7 @@ void sym_cost (symbol_t * sym, uint bit_len)
 	uint cost_def;
 	uint cost_ref = 2 + bit_len;  // 2 bits for reference prefix '11'
 
-	if (sym->level == 0)
+	if (sym->size == 1)
 		{
 		// Base symbol
 
@@ -621,9 +591,9 @@ void sym_cost (symbol_t * sym, uint bit_len)
 		sym->cost_next = cost_use;
 
 		// FIXME: dropping a derived symbol causes more children usage
-		// so have to update the duplicate count of the children first
-		// then to restart cost computation & selection one level down
-		if ((sym->level) > 0 && (sym->dup_count > 1))
+		// so have to update the usage count of the children first
+		// then to restart cost computation & selection from children
+		if (sym->size > 1 && sym->dup_count > 1)
 			{
 			// printf ("Missing code at %s(%u)\n", __FILE__, __LINE__);
 			}

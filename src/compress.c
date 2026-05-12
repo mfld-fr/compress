@@ -743,7 +743,7 @@ static void sym_out (symbol_t * sym, uchar_t bit_len)
 
 static void child_out (symbol_t * sym, uchar_t bit_len)
 	{
-	if (sym->level == 0)
+	if (sym->size == 1)
 		{
 		// Output base code
 
@@ -796,22 +796,17 @@ static void compress_si ()
 		{
 		if (opt_verb) printf ("Used bits: %u\n", bit_used);
 
-		// Iterate on the level from 0 (base) to top
+		// Iterate on the symbols
 
 		keep_count = 0;
 
-		for (uint level = 0; level < level_count; level++)
+		node = sym_root.next;
+		while (node != &sym_root)
 			{
-			// Iterate on each symbol in that level
-			// and compute its cost
-
-			list_t * node = levels [level].next;
-			while (node != &(levels [level]))
-				{
-				symbol_t * sym = structof (symbol_t, node_level, node);
-				sym_cost (sym, bit_used);
-				node = node->next;
-				}
+			// Compute symbol cost
+			symbol_t * sym = structof (symbol_t, node, node);
+			sym_cost (sym, bit_used);
+			node = node->next;
 			}
 
 		uchar bit_need = log2u (keep_count - 1);

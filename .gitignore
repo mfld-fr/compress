@@ -1,5 +1,9 @@
 /Debug/
 /Release/
 /gmon.out
-/test.out
-/test.in
+/test_in.*
+/test_out.*
+/data.bin*
+/code.bin*
+/ash.bin*
+/test.log
