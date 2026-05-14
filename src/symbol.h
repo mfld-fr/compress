@@ -13,22 +13,20 @@ struct symbol_s
 	{
 	list_t node;        // must be the first member
 
-	uint_t pos_count;   // number of occurrences in the frame
-	uint_t tree_count;  // number of occurrences in the tree
-	uint_t rep_count;   // number of repetitions
-	uint_t dup_count;   // total number of occurrences (= pos_count + tree_count)
+	uint_t pos_count;  // usage count in frame
+	uint_t sym_count;  // usage count in tree
+	uint_t rep_count;  // repetition count
+	uint_t use_count;  // total usage count
 
 	uchar_t keep;   // define in the dictionary
 	uint_t  index;  // index in the dictionary
 	uint_t  len;    // definition length
 	uint    pass;   // walk flag
-	uint    order;  // order in the tree walk
+	uint    cost;   // use cost
+	int     gain;   // gain when defined
 
-	uchar keep_fit;
-	uint  len_fit;
-
-	uint cost_first;  // cost to use first time
-	uint cost_next;   // cost to use next time
+	uchar best_keep;  // save best selection
+	uint  best_len;
 
 	int tree_gain;  // gain in tree when defined
 	int pos_gain;   // gain in frame when defined
@@ -90,11 +88,13 @@ extern uint_t pos_count;  // list of positions
 
 #define SORT_ALL 0  // sort by impact (occurrences * size)
 #define SORT_REP 1  // filter repeat out
-#define SORT_DUP 2  // sort by occurrences
+#define SORT_USE 2  // sort by usage count
+#define SORT_GAIN 3  // by gain
+
 
 struct index_sym_s
 	{
-	uint_t key;
+	int key;
 	symbol_t * sym;
 	};
 
@@ -117,14 +117,13 @@ symbol_t * sym_add ();
 void sym_sort (uint_t kind);
 void sym_list (uint_t filter);
 
-uint_t keep_init ();
-
 void scan_base ();
 
 void crunch_word ();
 void crunch_rep ();
 
-uint sym_order (symbol_t * sym, uint order);
-void sym_cost (symbol_t * sym, uint bit_len);
+uint_t keep_dup ();
+
+uint sym_cost (symbol_t * sym, uint bit_len, uchar select);
 
 //------------------------------------------------------------------------------

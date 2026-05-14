@@ -144,7 +144,7 @@ static void expand_rb ()
 
 static void compress_pb ()
 	{
-	sym_sort (SORT_DUP);
+	sym_sort (SORT_USE);
 
 	// No more than 6 prefixed bits to save space
 	// so no more than 14 indexed symbols
@@ -499,13 +499,13 @@ static void compress_se ()
 
 	if (opt_sym)
 		{
-		sym_sort (SORT_DUP);
+		sym_sort (SORT_ALL);
 		sym_list (LIST_ALL);
 		}
 
 	// Initial symbol keep or drop choice
 
-	uint_t def_count = keep_init ();
+	uint_t def_count = keep_dup ();
 	uchar_t bit_len;
 
 	uint min_cost = UINT_MAX;
@@ -529,7 +529,7 @@ static void compress_se ()
 				uint_t cost1 = cost0;
 				if (sym->len > 1) cost1 += cost_pref_odd (sym->len - 1);
 				// Reference prefix is '1'
-				sym->tree_gain = cost0 * sym->tree_count - cost1 - (1 + bit_len) * (sym->tree_count - 1);
+				sym->tree_gain = cost0 * sym->sym_count - cost1 - (1 + bit_len) * (sym->sym_count - 1);
 				tree_cost += cost1;
 				}
 
@@ -599,14 +599,15 @@ static void compress_se ()
 		if (--def_count == 0) break;
 		}
 
-	if (opt_verb)
-		{
-		printf ("Minimal encoding cost = %u\n", min_cost);
-		printf ("Best definition count = %u\n\n", min_def);
-		}
-
 	def_count = min_def;
 	bit_len = log2u (def_count - 1);
+
+	if (opt_verb)
+		{
+		printf ("Minimal encoding cost: %u bits / %u bytes\n", min_cost, min_cost / 8);
+		printf ("Best definition count: %u\n", min_def);
+		printf ("Best reference bits: %u\n\n", bit_len);
+		}
 
 	// Index the symbols
 
@@ -767,94 +768,116 @@ static void compress_si ()
 
 	if (opt_sym)
 		{
-		sym_sort (SORT_DUP);
+		sym_sort (SORT_USE);
 		sym_list (LIST_ALL);
-		}
-
-	// Compute the symbols order from the position list
-
-	uint order = 1;
-	list_t * node = pos_root.next;
-	while (node != &pos_root)
-		{
-		position_t * pos = (position_t *) node;  // node as first member
-		order = sym_order (pos->sym, order);
-		node = node->next;
 		}
 
 	// First consider that all the duplicated symbols are worth to keep
 	// and compute the number of bits needed to encode all that symbols
 
-	keep_count = keep_init ();
-	if (opt_verb) printf ("Symbols worth: %u\n\n", keep_count);
-	uchar bit_used = log2u (keep_count - 1);
-	uchar bit_fit = bit_used;
+	keep_count = keep_dup ();
+	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
+	uchar ref_bit = log2u (keep_count - 1);
 
-	// Iterate on the number of bits down to 0 to get the best one
+	uchar best_bit = UCHAR_MAX;
+	uint min_cost = UINT_MAX;
 
-	while (bit_used > 0)
+	// Iterate on the reference bits down to 0 to get the best one
+
+	list_t * node;
+
+	while (ref_bit > 0)
 		{
-		if (opt_verb) printf ("Used bits: %u\n", bit_used);
+		if (opt_verb) printf ("Reference bits: %u\n", ref_bit);
 
-		// Iterate on the symbols
+		// Compute the symbol costs
 
 		keep_count = 0;
 
 		node = sym_root.next;
 		while (node != &sym_root)
 			{
-			// Compute symbol cost
 			symbol_t * sym = structof (symbol_t, node, node);
-			sym_cost (sym, bit_used);
+			sym_cost (sym, ref_bit, 1);  // select
 			node = node->next;
 			}
 
-		uchar bit_need = log2u (keep_count - 1);
+		if (opt_verb) printf ("Worth symbols: %u\n", keep_count);
 
-		if (opt_verb)
+		// Discard worthless
+
+		sym_sort (SORT_GAIN);
+
+		uint keep_max = 1 << ref_bit;
+		if (keep_count > keep_max)
 			{
-			printf ("Symbols kept: %u\n", keep_count);
-			printf ("Needed bits: %u\n\n", bit_need);
+			for (uint i = keep_max; i < keep_count; i++)
+				{
+				index_sym_t * index = index_sym + i;
+				symbol_t * sym = index->sym;
+				sym->keep = 0;
+				}
+
+			keep_count = keep_max;
 			}
 
-		if (bit_need > bit_used) break;
+		if (opt_verb) printf ("Kept symbols: %u\n", keep_count);
 
-		// Save the best fit
+		// Recompute the symbol costs
 
-		bit_fit = bit_used;
+		uint cost = 0;
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = structof (symbol_t, node, node);
+			cost += sym_cost (sym, ref_bit, 0);  // no select
+			node = node->next;
+			}
+
+		if (opt_verb) printf ("Total cost: %u bytes\n\n", cost / 8);
+
+		// No need to go further when cost increases
+		if (cost >= min_cost) break;
+
+		min_cost = cost;
+		best_bit = ref_bit;
+
+		// Save the best selection
 
 		node = sym_root.next;
 		while (node != &sym_root)
 			{
 			symbol_t * sym = (symbol_t *) node;  // node as first member
-			sym->keep_fit = sym->keep;
-			sym->len_fit = sym->len;
+			sym->best_keep = sym->keep;
+			sym->best_len = sym->len;
 			node = node->next;
 			}
 
-		bit_used--;
+		ref_bit--;
 		}
 
-	// Restore the best fit
+	if (opt_verb) printf ("Best bits: %u\n\n", best_bit);
+
+	// Restore the best selection
 
 	node = sym_root.next;
 	while (node != &sym_root)
 		{
 		symbol_t * sym = (symbol_t *) node;  // node as first member
-		sym->keep = sym->keep_fit;
-		sym->len = sym->len_fit;
+		sym->keep = sym->best_keep;
+		sym->len = sym->best_len;
 		node = node->next;
 		}
 
-	// Output the best fit
+	// Output the best selection
 
-	out_pref_odd (bit_fit - 1);
+	out_pref_odd (best_bit - 1);
 
 	node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = (position_t *) node;  // node as first member
-		sym_out (pos->sym, bit_fit);
+		sym_out (pos->sym, best_bit);
 		node = node->next;
 		}
 
@@ -944,7 +967,7 @@ static void compress_rse ()
 		sym_list (LIST_ALL);
 		}
 
-	uint count = keep_init ();
+	uint count = keep_dup ();
 	uchar_t bit_len = log2u (count);
 
 	// Index the symbols

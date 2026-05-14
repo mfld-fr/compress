@@ -37,8 +37,8 @@ static list_t hole_root;
 
 static int sym_comp (const void * v1, const void * v2)
 	{
-	uint_t k1 = ((index_sym_t *) v1)->key;
-	uint_t k2 = ((index_sym_t *) v2)->key;
+	int k1 = ((index_sym_t *) v1)->key;
+	int k2 = ((index_sym_t *) v2)->key;
 
 	return (k1 < k2) ? 1 : ((k1 > k2) ? -1 : 0);
 	}
@@ -68,7 +68,7 @@ void sym_sort (uint_t kind)
 		index_sym_t * index = index_sym + i;
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-		sym->dup_count = sym->pos_count + sym->tree_count;
+		sym->use_count = sym->pos_count + sym->sym_count;
 
 		switch (kind)
 			{
@@ -76,7 +76,7 @@ void sym_sort (uint_t kind)
 				if (sym->rep_count > 1)
 					index->key = sym->rep_count * sym->size;
 				else
-					index->key = sym->dup_count * sym->size;
+					index->key = sym->use_count * sym->size;
 				break;
 
 			case SORT_REP:
@@ -86,11 +86,15 @@ void sym_sort (uint_t kind)
 					break;
 					}
 
-				index->key = sym->dup_count;
+				index->key = sym->use_count;
 				break;
 
-			case SORT_DUP:
-				index->key = sym->dup_count;
+			case SORT_USE:
+				index->key = sym->use_count;
+				break;
+
+			case SORT_GAIN:
+				index->key = sym->gain;
 				break;
 
 			default:
@@ -115,33 +119,6 @@ void sym_sort (uint_t kind)
 	}
 
 
-// Initial symbol keep or drop choice
-
-uint_t keep_init ()
-	{
-	uint_t filt_count = 0;
-
-	list_t * node = sym_root.next;
-	for (uint_t i = 0; i < sym_count; i++)
-		{
-		symbol_t * sym = (symbol_t *) node;  // node as first member
-
-		sym->dup_count = sym->pos_count + sym->tree_count;
-		if (sym->dup_count > 1 || (sym->rep_count == 1 && sym->size > 1))
-			{
-			// Duplicated or repeated symbols are presumed valuable
-			// until cost computation confirms or not
-			sym->keep = 1;
-			filt_count++;
-			}
-
-		node = node->next;
-		}
-
-	return filt_count;
-	}
-
-
 // List the used symbols
 
 void sym_list (uint_t filter)
@@ -158,7 +135,7 @@ void sym_list (uint_t filter)
 
 		if (filter == LIST_KEEP && !sym->keep) continue;
 
-		uint_t sym_dup = sym->pos_count + sym->tree_count;  // TODO: replace by sym->dup_count
+		uint_t sym_dup = sym->pos_count + sym->sym_count;  // TODO: replace by sym->use_count
 		use_count += sym_dup;
 
 		double p = (double) sym_dup / (pos_count + sym_count);
@@ -176,11 +153,16 @@ void sym_list (uint_t filter)
 		else
 			printf (" pos=%u", sym->pos_count);
 
-		printf (" tree=%u\n", sym->tree_count);
+		printf (" tree=%u", sym->sym_count);
+
+		if (sym->cost)
+			printf (" gain=%i", sym->gain);
+
+		puts ("");
 		}
 
 	printf ("\nEntropy: %f\n", entropy);
-	printf ("Core size: %u\n\n", (uint) (entropy * use_count / 8));
+	printf ("Core size: %u bytes\n\n", (uint) (entropy * use_count / 8));
 	}
 
 
@@ -354,8 +336,9 @@ static int crunch_pair (pair_t * pair)
 				if (pos_right->pair)
 					{
 					dec_pair (pos_right->pair);
-					pos_right->pair = NULL;   // position will be crunched later
-					// hole_add (pos_right);  // position will be crunched later
+					// position will be crunched later
+					// pos_right->pair = NULL;
+					// hole_add (pos_right);
 					}
 				}
 
@@ -372,10 +355,10 @@ static int crunch_pair (pair_t * pair)
 				sym->size = sym_left->size + sym_right->size;
 
 				sym->left = sym_left;
-				sym_left->tree_count++;
+				sym_left->sym_count++;
 
 				sym->right = sym_right;
-				sym_right->tree_count++;
+				sym_right->sym_count++;
 				}
 
 			sym_left->pos_count--;
@@ -504,7 +487,7 @@ void crunch_rep ()
 				sym_rep->size = sym_left->size;
 
 				sym_rep->left = sym_left;
-				sym_left->tree_count++;
+				sym_left->sym_count++;
 				}
 
 			sym_right->pos_count--;
@@ -513,8 +496,9 @@ void crunch_rep ()
 			sym_rep->size += sym_right->size;
 
 			if (pos_right->pair) dec_pair (pos_right->pair);
-			//pos_right->pair = NULL;  // position will be crunched later
-			//pos_right->sym = NULL;  // position will be crunched later
+			// position will be crunched later
+			// pos_right->pair = NULL;
+			// pos_right->sym = NULL;
 
 			// Shift frame end to the left
 
@@ -531,36 +515,56 @@ void crunch_rep ()
 	}
 
 
-// Walk the symbol tree to compute symbol usage order
+// Keep duplicated symbols
 
-uint sym_order (symbol_t * sym, uint order)
+uint_t keep_dup ()
 	{
-	if (sym->order) return order;  // skip if already set earlier
+	uint_t count = 0;
 
-	sym->order = order++;
-	if (sym->size == 1) return order;
+	list_t * node = sym_root.next;
+	for (uint_t i = 0; i < sym_count; i++)
+		{
+		symbol_t * sym = (symbol_t *) node;  // node as first member
 
-	if (sym->left) order = sym_order (sym->left, order);
-	if (sym->right) order = sym_order (sym->right, order);
-	return order;
+		sym->use_count = sym->pos_count + sym->sym_count;
+		if (sym->use_count > 1 || (sym->rep_count == 1 && sym->size > 1))
+			{
+			// Duplicated or repeated symbols are presumed valuable
+			// until cost computation confirms or not
+			sym->keep = 1;
+			count++;
+			}
+		else
+			{
+			sym->keep = 0;
+			}
+
+		node = node->next;
+		}
+
+	return count;
 	}
 
 
-// Compute symbol cost and decide whether to keep or drop it
+// Compute symbol cost in SI algorithm
+// Decide whether to define it (keep) or not (drop)
 
-void sym_cost (symbol_t * sym, uint bit_len)
+uint sym_cost (symbol_t * sym, uint bit_len, uchar select)
 	{
-	uint cost_use;
-	uint cost_def;
-	uint cost_ref = 2 + bit_len;  // 2 bits for reference prefix '11'
+	uint use_cost;
+	uint def_cost;
+	uint ref_cost = 2 + bit_len;  // 2 bits for reference prefix '11'
+
+	uint drop_cost;
 
 	if (sym->size == 1)
 		{
 		// Base symbol
 
 		sym->len = 1;
-		cost_use = 1 + 8;
-		cost_def =  2 + cost_use;
+		use_cost = 1 + 8;  // 1 bit for base prefix
+		def_cost =  2 + use_cost;  // 2 bits for definition prefix '10'
+		drop_cost = sym->use_count * use_cost;
 		}
 	else
 		{
@@ -569,42 +573,27 @@ void sym_cost (symbol_t * sym, uint bit_len)
 		sym->len = sym->left->keep ? 1 : sym->left->len;
 		sym->len += sym->right->keep ? 1 : sym->right->len;
 
-		uint cost = (sym->left->order > sym->order) ? sym->left->cost_first : sym->left->cost_next;
-		cost += (sym->right->order > sym->order) ? sym->right->cost_first : sym->right->cost_next;
-
-		cost_use = cost;
-		cost_def = 2 + cost_pref_odd (sym->len - 1) + cost;
+		use_cost = sym->left->cost + sym->right->cost;
+		def_cost = 2 + cost_pref_odd (sym->len - 1);
+		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 
-	// Consider both costs whenever kept or not
+	uint keep_cost = def_cost + (sym->use_count - 1) * ref_cost;
 
-	uint cost_drop = sym->dup_count * cost_use;
-	uint cost_keep = cost_def + (sym->dup_count -1) * cost_ref;
-	int cost_gain = cost_drop - cost_keep;
+	sym->gain = drop_cost - keep_cost;
 
 	// Keep or drop the symbol according to the cost gain
 
-	if (cost_gain <= 0)
+	if (select)
 		{
-		sym->keep = 0;
-		sym->cost_first = cost_use;
-		sym->cost_next = cost_use;
+		uchar keep = (sym->gain > 0) ? 1 : 0;
+		sym->keep = keep;
+		keep_count += keep;
+		}
 
-		// FIXME: dropping a derived symbol causes more children usage
-		// so have to update the usage count of the children first
-		// then to restart cost computation & selection from children
-		if (sym->size > 1 && sym->dup_count > 1)
-			{
-			// printf ("Missing code at %s(%u)\n", __FILE__, __LINE__);
-			}
-		}
-	else
-		{
-		sym->keep = 1;
-		sym->cost_first = cost_def;
-		sym->cost_next = cost_ref;
-		keep_count++;
-		}
+	sym->cost = sym->keep ? ref_cost : use_cost;
+
+	return sym->keep ? keep_cost : drop_cost;
 	}
 
 //------------------------------------------------------------------------------

@@ -83,7 +83,7 @@ R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4835  31821  38006
-SI           4636  31527  37095
+SI           4622  30593  36415
 RSE          3875  35903  41736   Less efficient for code
 RSI          x     x      x
 PS           x     x      x

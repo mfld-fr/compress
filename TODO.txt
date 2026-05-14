@@ -1,8 +1,24 @@
 TODO LIST
 
+
+CURRENT WORK:
+
+The SE and SI algorithms optimize encoding cost in different manners.
+
+The SE iterates on the kept symbols, drops the symbol with less gain,
+with reference bits adjusted to the kept symbols.
+
+The SI iterates on the reference bits, with kept symbols adjusted to that
+reference bits. It is faster than SE.
+
+Apply the faster SI cost optimization to SE.
+
+
+
+NEXT WORK:
+
 Cleanup:
 - Move each algo to its own file
-- Rename 'dup_count' to 'use_count'
 
 Improvements:
 - more accurate timing with dedicated option -t
