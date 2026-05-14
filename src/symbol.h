@@ -86,9 +86,9 @@ extern uint_t pos_count;  // list of positions
 
 // Kind of sorting
 
-#define SORT_ALL 0  // sort by impact (occurrences * size)
-#define SORT_REP 1  // filter repeat out
-#define SORT_USE 2  // sort by usage count
+#define SORT_ALL  0  // sort by impact (occurrences * size)
+#define SORT_REP  1  // filter repeat out
+#define SORT_USE  2  // sort by usage count
 #define SORT_GAIN 3  // by gain
 
 
@@ -124,6 +124,7 @@ void crunch_rep ();
 
 uint_t keep_dup ();
 
-uint sym_cost (symbol_t * sym, uint bit_len, uchar select);
+uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select);
+uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select);
 
 //------------------------------------------------------------------------------

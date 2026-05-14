@@ -5,7 +5,7 @@ for best performance and portability.
 
 The compressor is intended to run on a host with standard resources (development
 PC). The decompressor is in turn intended to run on a target with limited
-resources (embedded).
+resources (embedded system).
 
 The main goal is to save storage space on the target, by compressing at most the
 read-only data on the host, and to decompress it on the target at the lowest
@@ -82,9 +82,9 @@ B(ase)       6151  43584  51216   Just for testing
 R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
-S(ymbol)E    4835  31821  38006
+S(ymbol)E    4662  30962  37064
 SI           4622  30593  36415
-RSE          3875  35903  41736   Less efficient for code
+RSE          4741  41996  48824   Less efficient (repeat encoding too costly)
 RSI          x     x      x
 PS           x     x      x
 RPS          x     x      x

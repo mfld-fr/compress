@@ -386,62 +386,24 @@ static uint_t walk_sym_len (symbol_t * sym)
 	}
 
 
-// Walk tree to compute cost
+// Walk tree to output symbols
 
-static uint_t walk_def_cost (symbol_t * sym, uchar_t bit_len);
+static void def_out (symbol_t * sym, uchar_t ref_bit);
 
-static uint_t walk_use_cost (symbol_t * sym, uchar_t bit_len)
-	{
-	uint_t cost;
-
-	if (!sym->keep)
-		{
-		cost = walk_def_cost (sym, bit_len);
-		}
-	else
-		{
-		// '1' for 'reference' + size of 'index'
-		cost = 1 + bit_len;
-		}
-
-	return cost;
-	}
-
-static uint_t walk_def_cost (symbol_t * sym, uchar_t bit_len)
-	{
-	uint_t cost;
-
-	if (sym->size == 1)
-		{
-		// '0' for 'base' + 8 for base code
-		cost = 1 + 8;
-		}
-	else
-		{
-		cost = walk_use_cost (sym->left, bit_len);
-		cost += walk_use_cost (sym->right, bit_len);
-		}
-
-	return cost;
-	}
-
-
-static void walk_def_out (symbol_t * sym, uchar_t bit_len);
-
-static void walk_use_out (symbol_t * sym, uchar_t bit_len)
+static void use_out (symbol_t * sym, uchar_t ref_bit)
 	{
 	if (!sym->keep)
 		{
-		walk_def_out (sym, bit_len);
+		def_out (sym, ref_bit);
 		}
 	else
 		{
 		out_bit (1);  // index
-		out_code (sym->index, bit_len);
+		out_code (sym->index, ref_bit);
 		}
 	}
 
-static void walk_def_out (symbol_t * sym, uchar_t bit_len)
+static void def_out (symbol_t * sym, uchar_t ref_bit)
 	{
 	if (sym->size == 1)
 		{
@@ -450,8 +412,8 @@ static void walk_def_out (symbol_t * sym, uchar_t bit_len)
 		}
 	else
 		{
-		walk_use_out (sym->left,  bit_len);
-		walk_use_out (sym->right, bit_len);
+		use_out (sym->left,  ref_bit);
+		use_out (sym->right, ref_bit);
 		}
 	}
 
@@ -503,131 +465,109 @@ static void compress_se ()
 		sym_list (LIST_ALL);
 		}
 
-	// Initial symbol keep or drop choice
+	// First consider that all the duplicated symbols are worth to keep
+	// and compute the number of bits to reference all that symbols
 
-	uint_t def_count = keep_dup ();
-	uchar_t bit_len;
+	keep_count = keep_dup ();
 
+	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
+	uchar ref_bit = log2u (keep_count - 1);
+
+	uchar best_bit = UCHAR_MAX;
+	uint best_keep = UINT_MAX;
 	uint min_cost = UINT_MAX;
-	uint min_def = def_count;
 
-	while (1)
+	// Iterate on the reference bits down to 0 to get the best one
+
+	list_t * node;
+
+	while (ref_bit > 0)
 		{
-		bit_len = log2u (def_count - 1);
+		if (opt_verb) printf ("Reference bits: %u\n", ref_bit);
 
-		// Compute tree cost
+		// Compute the symbol costs
 
-		uint_t tree_cost = 0;
-		list_t * node = sym_root.next;
-		for (uint_t i = 0; i < sym_count; i++)
-			{
-			symbol_t * sym = (symbol_t *) node;  // node as first member
-			walk_sym_len (sym);
-			if (sym->keep)
-				{
-				uint_t cost0 = walk_def_cost (sym, bit_len);
-				uint_t cost1 = cost0;
-				if (sym->len > 1) cost1 += cost_pref_odd (sym->len - 1);
-				// Reference prefix is '1'
-				sym->tree_gain = cost0 * sym->sym_count - cost1 - (1 + bit_len) * (sym->sym_count - 1);
-				tree_cost += cost1;
-				}
-
-			node = node->next;
-			}
-
-		// Compute frame cost
-
-		uint_t pos_cost = 0;
-		node = pos_root.next;
-		while (node != &pos_root)
-			{
-			position_t * pos = (position_t *) node;  // node as first member
-			symbol_t * sym = pos->sym;
-
-			uint_t cost0 = walk_use_cost (sym, bit_len);
-			uint_t cost1 = walk_def_cost (sym, bit_len);
-			sym->pos_gain += cost1 - cost0;
-			pos_cost += cost0;
-
-			node = node->next;
-			}
-
-		// Compute total cost
-		// and get the gain looser
-
-		int gain_min = INT_MAX;
-		symbol_t * sym_min = NULL;
+		keep_count = 0;
 
 		node = sym_root.next;
-		for (uint_t i = 0; i < sym_count; i++)
+		while (node != &sym_root)
 			{
-			symbol_t * sym = (symbol_t *) node;  // node as first member
-			if (sym->keep)
-				{
-				sym->all_gain = sym->tree_gain + sym->pos_gain;
-				if (sym->all_gain < gain_min)
-					{
-					gain_min = sym->all_gain;
-					sym_min = sym;
-					}
-				}
-
+			symbol_t * sym = structof (symbol_t, node, node);
+			sym_cost_se (sym, ref_bit, 1);  // select
 			node = node->next;
 			}
 
-		uint_t all_cost = tree_cost + pos_cost;
-		if (all_cost < min_cost)
+		if (opt_verb) printf ("Worth symbols: %u\n", keep_count);
+
+		// Discard worthless
+
+		sym_sort (SORT_GAIN);
+
+		uint keep_max = 1 << ref_bit;
+		if (keep_count > keep_max)
 			{
-			min_cost = all_cost;
-			min_def = def_count;
+			for (uint i = keep_max; i < keep_count; i++)
+				{
+				index_sym_t * index = index_sym + i;
+				symbol_t * sym = index->sym;
+				sym->keep = 0;
+				}
+
+			keep_count = keep_max;
 			}
 
-		sym_min->keep = 0;
-		sym_min->pass = def_count;
+		if (opt_verb) printf ("Kept symbols: %u\n", keep_count);
 
-		// Reset previous calculation
+		// Recompute the symbol costs
+
+		uint cost = 0;
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = structof (symbol_t, node, node);
+			cost += sym_cost_se (sym, ref_bit, 0);  // no select
+			node = node->next;
+			}
+
+		if (opt_verb) printf ("Total cost: %u bytes\n\n", cost / 8);
+
+		// No need to go further when cost increases
+		if (cost >= min_cost) break;
+
+		best_keep = keep_count;
+		min_cost = cost;
+		best_bit = ref_bit;
+
+		// Save the best selection
 
 		node = sym_root.next;
 		while (node != &sym_root)
 			{
 			symbol_t * sym = (symbol_t *) node;  // node as first member
-			sym->len = 0;
+			sym->best_keep = sym->keep;
+			sym->best_len = sym->len;
 			node = node->next;
 			}
 
-		if (--def_count == 0) break;
+		ref_bit--;
 		}
 
-	def_count = min_def;
-	bit_len = log2u (def_count - 1);
+	if (opt_verb) printf ("Best bits: %u\n\n", best_bit);
 
-	if (opt_verb)
-		{
-		printf ("Minimal encoding cost: %u bits / %u bytes\n", min_cost, min_cost / 8);
-		printf ("Best definition count: %u\n", min_def);
-		printf ("Best reference bits: %u\n\n", bit_len);
-		}
+	// Restore the best selection
 
-	// Index the symbols
-
-	uint_t index = 0;
-	list_t * node = sym_root.next;
+	node = sym_root.next;
 	while (node != &sym_root)
 		{
 		symbol_t * sym = (symbol_t *) node;  // node as first member
-		if (sym->pass && sym->pass <= def_count)
-			{
-			sym->keep = 1;
-			sym->index = index++;
-			}
-
+		sym->keep = sym->best_keep;
+		sym->len = sym->best_len;
 		node = node->next;
 		}
 
 	// Output symbol dictionary
 
-	out_pref_odd (def_count - 1);
+	out_pref_odd (best_keep - 1);
 
 	node = sym_root.next;
 	while (node != &sym_root)
@@ -635,9 +575,9 @@ static void compress_se ()
 		symbol_t * sym = (symbol_t *) node;  // node as first member
 		if (sym->keep)
 			{
-			uint_t len = walk_sym_len (sym);
-			if (len > 1) out_pref_odd (len - 1);
-			walk_def_out (sym, bit_len);
+			if (sym->len > 1) out_pref_odd (sym->len - 1);
+			def_out (sym, best_bit);
+			sym->index = index_count++;
 			}
 
 		node = node->next;
@@ -648,11 +588,8 @@ static void compress_se ()
 	node = pos_root.next;
 	while (node != &pos_root)
 		{
-		position_t * pos = (position_t *) node;  // node as first member
-		symbol_t * sym = pos->sym;
-
-		walk_use_out (sym, bit_len);
-
+		position_t * pos = structof (position_t, node, node);
+		use_out (pos->sym, best_bit);
 		node = node->next;
 		}
 
@@ -773,7 +710,7 @@ static void compress_si ()
 		}
 
 	// First consider that all the duplicated symbols are worth to keep
-	// and compute the number of bits needed to encode all that symbols
+	// and compute the number of bits to reference all that symbols
 
 	keep_count = keep_dup ();
 	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
@@ -798,7 +735,7 @@ static void compress_si ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			sym_cost (sym, ref_bit, 1);  // select
+			sym_cost_si (sym, ref_bit, 1);  // select
 			node = node->next;
 			}
 
@@ -830,7 +767,7 @@ static void compress_si ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			cost += sym_cost (sym, ref_bit, 0);  // no select
+			cost += sym_cost_si (sym, ref_bit, 0);  // no select
 			node = node->next;
 			}
 
@@ -995,7 +932,7 @@ static void compress_rse ()
 			// TODO: same optimization as SE
 			//if (len > 1) out_pref_odd (len - 1);
 			out_pref_odd (len - 1);
-			walk_def_out (sym, bit_len);
+			def_out (sym, bit_len);
 			}
 
 		node = node->next;
@@ -1025,7 +962,7 @@ static void compress_rse ()
 			out_bit (0);  // no repeat
 			}
 
-		walk_use_out (sym, bit_len);
+		use_out (sym, bit_len);
 
 		node = node->next;
 		}

@@ -1,35 +1,18 @@
 TODO LIST
 
-
-CURRENT WORK:
-
-The SE and SI algorithms optimize encoding cost in different manners.
-
-The SE iterates on the kept symbols, drops the symbol with less gain,
-with reference bits adjusted to the kept symbols.
-
-The SI iterates on the reference bits, with kept symbols adjusted to that
-reference bits. It is faster than SE.
-
-Apply the faster SI cost optimization to SE.
-
-
-
-NEXT WORK:
-
 Cleanup:
-- Move each algo to its own file
+- Move each algorithm to its own file
 
 Improvements:
 - more accurate timing with dedicated option -t
 - Factorize SE and SI code
 - encoding option
-- merge table and sequence in RS (= RSI)
-- repeat symbol in tree
+- repeat symbol also in tree
 - automatic benchmarking
 
 To explore:
 - replace length by 1 bit prefix in definition
+- is the RSI algorithm better than SI ?
 - prefixed encoding parameter
 - prefixed encoding cost optimization
 - repeat count as symbol ?
@@ -37,10 +20,10 @@ To explore:
 - definition header as symbol ?
 - repeat header as symbol ?
 
-Huffman coding experiment:
+Huffman encoding experiment to compare with GZIP:
 - binary tree structure
 - binary tree coding
 - binary tree decoding
 - adaptative tree
 - symbol coding
-- lenght and count coding ?
+- lenght and repeat encoding ?

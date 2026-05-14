@@ -546,14 +546,63 @@ uint_t keep_dup ()
 	}
 
 
-// Compute symbol cost in SI algorithm
+// Compute symbol cost in SE algorithm
 // Decide whether to define it (keep) or not (drop)
 
-uint sym_cost (symbol_t * sym, uint bit_len, uchar select)
+uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
 	{
 	uint use_cost;
 	uint def_cost;
-	uint ref_cost = 2 + bit_len;  // 2 bits for reference prefix '11'
+	uint ref_cost = 1 + ref_bit;  // 1 bit for reference prefix '1'
+
+	uint drop_cost;
+
+	if (sym->size == 1)
+		{
+		// Base symbol
+
+		sym->len = 1;
+		use_cost = 1 + 8;  // 1 bit for base prefix '0' and 8 bits for base code
+		def_cost = use_cost;
+		drop_cost = sym->use_count * use_cost;
+		}
+	else
+		{
+		// Derived symbol
+
+		sym->len = sym->left->keep ? 1 : sym->left->len;
+		sym->len += sym->right->keep ? 1 : sym->right->len;
+
+		use_cost = sym->left->cost + sym->right->cost;
+		def_cost = cost_pref_odd (sym->len - 1);
+		drop_cost = (sym->use_count - 1) * use_cost;
+		}
+
+	uint keep_cost = def_cost + sym->use_count * ref_cost;
+
+	sym->gain = drop_cost - keep_cost;
+
+	// Keep or drop the symbol according to the cost gain
+
+	if (select)
+		{
+		uchar keep = (sym->gain > 0) ? 1 : 0;
+		sym->keep = keep;
+		keep_count += keep;
+		}
+
+	sym->cost = sym->keep ? ref_cost : use_cost;
+	return sym->keep ? keep_cost : drop_cost;
+	}
+
+// Compute symbol cost in SI algorithm
+// Decide whether to define it (keep) or not (drop)
+
+uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
+	{
+	uint use_cost;
+	uint def_cost;
+	uint ref_cost = 2 + ref_bit;  // 2 bits for reference prefix '11'
 
 	uint drop_cost;
 
