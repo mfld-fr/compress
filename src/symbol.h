@@ -28,10 +28,6 @@ struct symbol_s
 	uchar best_keep;  // save best selection
 	uint  best_len;
 
-	int tree_gain;  // gain in tree when defined
-	int pos_gain;   // gain in frame when defined
-	int all_gain;   // overall gain when defined
-
 	uchar_t code;  // byte code of base symbol
 	uint_t  base;  // offset of first occurrence in input frame
 	uint_t  size;  // size in byte codes

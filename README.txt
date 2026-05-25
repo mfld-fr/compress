@@ -20,27 +20,29 @@ DESIGN
 Because of small data sizes on the target, compression is performed on the
 whole initial sequence of base symbols (as byte codes). This gives a better
 symbol ratio, but requires more computation than the algorithms using a
-sliding window (these are better suited for long data streams).
+sliding window like LZ* (these are better suited for long data streams).
 
 The compressor repeatedly scans the sequence to find elementary patterns as
-symbol pairs, then replaces the most frequent & asymmetric pair by a secondary
-symbol, thus building a binary tree of symbols and a reduced final sequence.
+symbol pairs, then replaces the most frequent & asymmetric pairs by derived
+symbols, thus building a binary tree of symbols and a reduced final sequence.
 
 When no more asymmetric pair is duplicated, the compressor reduces the tree,
-(including the repeated symbols), then serializes that tree as an indexed table
-of words (= dictionary), plus the final sequence.
+(including the repeated symbols), then serializes that tree plus the final
+sequence in a bit stream.
 
-As this dictionary is static, preceding or embedded in the sequence, it saves
-the cost of dynamically rebuild it at decompression.
+For some algorithms (SE, SI), the encoding cost of the serialization is
+computed and an optimization loop selects the symbols that are worth to be
+defined in the dictionary.
 
-The table and the sequence are encoded as a bit stream. Base symbols are
-serialized as byte codes, while secondary ones are serialized using indexes.
+As this dictionary is static, preceding (SE) or embedded (SI) in the final
+sequence, it saves the cost of dynamically rebuild it at decompression.
 
-Prefixed coding is prefered to Huffman or arithmetic ones to keep the
-decompression cost low, even if less optimal.
+Predefined prefixed coding is prefered to Huffman or arithmetic ones to keep
+the decompression cost low, even if less optimal.
 
-Decompression is much simpler. It decodes the bit stream, rebuild the symbol
-tree from the table, iterates on the sequence and recursively walks the tree.
+Decompression is much simpler, so easy to implement in the target. It decodes
+the bit stream, rebuilds the symbol tree, iterates on the final sequence and
+recursively walks the tree to output the initial sequence.
 
 
 STATUS
@@ -82,9 +84,9 @@ B(ase)       6151  43584  51216   Just for testing
 R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
-S(ymbol)E    4662  30962  37064
-SI           4622  30593  36415
-RSE          4741  41996  48824   Less efficient (repeat encoding too costly)
+S(ymbol)E    4667  30869  36998
+SI           4601  30386  36242
+RSE          4685  41604  48388   Less efficient (repeat encoding too costly)
 RSI          x     x      x
 PS           x     x      x
 RPS          x     x      x
@@ -100,13 +102,13 @@ Compression time for ASH (ms):
 
 ENCODING    COMPRESS  EXPAND
 
-B(ase)      6         2
-R(epeat)B   -         -
-P(refix)B   9         3
-RPB         -         -
-S(ymbol)E   3719      6
-SI          1721      2
-RSE         2395      2
+B(ase)      2         0.217
+R(epeat)B   3         0.660
+P(refix)B   2         0.767
+RPB         3         0.785
+S(ymbol)E   1719      0.764
+SI          1702      0.661
+RSE         1738      1.166
 RSI         x         x
 PS          x         x
 RPS         x         x

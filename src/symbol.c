@@ -63,10 +63,11 @@ symbol_t * sym_add ()
 void sym_sort (uint_t kind)
 	{
 	list_t * node = sym_root.next;
-	for (uint_t i = 0; i < sym_count; i++)  // TODO: replace by list
+	index_sym_t * index = index_sym;
+
+	while (node != &sym_root)
 		{
-		index_sym_t * index = index_sym + i;
-		symbol_t * sym = (symbol_t *) node;  // node as first member
+		symbol_t * sym = structof (symbol_t, node, node);
 
 		sym->use_count = sym->pos_count + sym->sym_count;
 
@@ -104,6 +105,7 @@ void sym_sort (uint_t kind)
 		index->sym = sym;
 
 		node = node->next;
+		index++;
 		}
 
 	qsort (index_sym, sym_count, sizeof (index_sym_t), sym_comp);
@@ -161,8 +163,7 @@ void sym_list (uint_t filter)
 		puts ("");
 		}
 
-	printf ("\nEntropy: %f\n", entropy);
-	printf ("Core size: %u bytes\n\n", (uint) (entropy * use_count / 8));
+	printf ("\nEntropy: %f\n\n", entropy);
 	}
 
 
@@ -524,7 +525,7 @@ uint_t keep_dup ()
 	list_t * node = sym_root.next;
 	for (uint_t i = 0; i < sym_count; i++)
 		{
-		symbol_t * sym = (symbol_t *) node;  // node as first member
+		symbol_t * sym = structof (symbol_t, node, node);
 
 		sym->use_count = sym->pos_count + sym->sym_count;
 		if (sym->use_count > 1 || (sym->rep_count == 1 && sym->size > 1))
@@ -574,7 +575,7 @@ uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
 		sym->len += sym->right->keep ? 1 : sym->right->len;
 
 		use_cost = sym->left->cost + sym->right->cost;
-		def_cost = cost_pref_odd (sym->len - 1);
+		def_cost = sym->len;  // len = number of next flags
 		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 
@@ -623,7 +624,7 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 		sym->len += sym->right->keep ? 1 : sym->right->len;
 
 		use_cost = sym->left->cost + sym->right->cost;
-		def_cost = 2 + cost_pref_odd (sym->len - 1);
+		def_cost = 2 + sym->len;  // len = number of next flags
 		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 

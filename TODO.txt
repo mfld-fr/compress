@@ -1,17 +1,20 @@
 TODO LIST
 
-Cleanup:
-- Move each algorithm to its own file
+Fix:
+- in_eof() is not safe for small data
+  test.txt makes it to fail
 
 Improvements:
-- more accurate timing with dedicated option -t
-- Factorize SE and SI code
-- encoding option
+- cost optimization in RSE
+- if RSE > SE, try RSI
+- ref_bit as ambiant parameter (global)
 - repeat symbol also in tree
 - automatic benchmarking
 
+Cleanup:
+- Move each algorithm to its own file
+
 To explore:
-- replace length by 1 bit prefix in definition
 - is the RSI algorithm better than SI ?
 - prefixed encoding parameter
 - prefixed encoding cost optimization

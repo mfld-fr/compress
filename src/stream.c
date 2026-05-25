@@ -71,7 +71,9 @@ void out_byte (uchar_t val)
 
 uchar in_eof ()
 	{
-	return pos_in == size_in;
+	// FIXME: unsafe function
+	// puts ("I'M BUGGY - REMOVE ME !!!");
+	return (pos_in == size_in);
 	}
 
 
@@ -102,7 +104,7 @@ void out_bit (uchar_t val)
 	}
 
 
-uchar_t in_bit ()
+uchar_t in_bit (uchar shift /* = 1 */)
 	{
 	if (!shift_in)
 		{
@@ -111,8 +113,12 @@ uchar_t in_bit ()
 		}
 
 	uchar_t val = byte_in & 1;
-	byte_in >>= 1;
-	shift_in--;
+
+	if (shift)
+		{
+		byte_in >>= 1;
+		shift_in--;
+		}
 
 	return val;
 	}
@@ -165,7 +171,7 @@ uint_t in_code (uchar_t len)
 
 	while (1)
 		{
-		code |= in_bit () ? 32768 : 0;  // 2^(16-1)
+		code |= in_bit (1) ? 32768 : 0;  // 2^(16-1)
 		if (++i == len) break;
 		code >>= 1;
 		}
@@ -187,7 +193,7 @@ uchar_t in_len ()
 	{
 	uchar_t len = 0;
 
-	while (in_bit ()) len++;
+	while (in_bit (1)) len++;
 
 	return len;
 	}
@@ -231,7 +237,7 @@ uint_t in_pref_odd ()
 	uchar_t suffix = 0;
 	uint_t base = 0;
 
-	while (in_bit ())
+	while (in_bit (1))
 		{
 		suffix++;
 		base = (base << 1) | 1;
@@ -267,7 +273,7 @@ uint_t in_pref_even ()
 	uchar_t suffix = 0;
 	uint_t base = 0;
 
-	while (in_bit ())
+	while (in_bit (1))
 		{
 		suffix++;
 		base = (base << 1) | 2;

@@ -9,8 +9,8 @@ PROG = Release/compress
 # $(2): input file
 define TEST_FILE
 	echo "Testing $(1) algo on $(2)"
-	$(PROG) -c -m $(1) $(2) test_out.bin
-	$(PROG) -e -m $(1) test_out.bin test_in.bin
+	$(PROG) -ct -m $(1) $(2) test_out.bin
+	$(PROG) -et -m $(1) test_out.bin test_in.bin
 	diff $(2) test_in.bin
 	du -b $(2) test_out.bin
 endef

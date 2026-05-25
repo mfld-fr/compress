@@ -24,15 +24,15 @@ extern uint_t size_out;
 
 // Global functions
 
-void in_frame ();
-void out_frame ();
+void in_frame (const char * name);
+void out_frame (const char * name);
 
 void out_byte (uchar_t val);
 uchar in_eof ();
 uchar_t in_byte ();
 
 void out_bit (uchar_t val);
-uchar_t in_bit ();
+uchar_t in_bit (uchar shift);
 
 void out_pad ();
 
