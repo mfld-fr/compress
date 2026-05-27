@@ -17,12 +17,15 @@ struct symbol_s
 	uint_t sym_count;  // usage count in tree
 	uint_t rep_count;  // repetition count
 	uint_t use_count;  // total usage count
+	uint   rep_pos;    // repeated position count
 
+	uchar   repeat; // repeat symbol
 	uchar_t keep;   // define in the dictionary
 	uint_t  index;  // index in the dictionary
 	uint_t  len;    // definition length
 	uint    pass;   // walk flag
 	uint    cost;   // use cost
+	uint    pcost;  // position cost (for RSE)
 	int     gain;   // gain when defined
 
 	uchar best_keep;  // save best selection
@@ -122,5 +125,6 @@ uint_t keep_dup ();
 
 uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select);
 uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select);
+uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select);
 
 //------------------------------------------------------------------------------

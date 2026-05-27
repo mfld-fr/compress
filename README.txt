@@ -53,7 +53,7 @@ Already implemented:
 - symbol sorting & listing
 - asymmetric pairing
 - repeated symbol in sequence
-- tree walking
+- symbol tree walking
 - bit coding & streaming
 - encoding cost computation
 
@@ -84,9 +84,9 @@ B(ase)       6151  43584  51216   Just for testing
 R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
-S(ymbol)E    4667  30869  36998
+S(ymbol)E    4667  30899  37026
 SI           4601  30386  36242
-RSE          4685  41604  48388   Less efficient (repeat encoding too costly)
+RSE          3637  32103  37915   Less efficient for code
 RSI          x     x      x
 PS           x     x      x
 RPS          x     x      x
@@ -108,7 +108,7 @@ P(refix)B   2         0.767
 RPB         3         0.785
 S(ymbol)E   1719      0.764
 SI          1702      0.661
-RSE         1738      1.166
+RSE         1784      0.818
 RSI         x         x
 PS          x         x
 RPS         x         x

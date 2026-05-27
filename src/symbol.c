@@ -6,6 +6,7 @@
 #include <string.h>
 #include <error.h>
 #include <math.h>
+#include <limits.h>
 
 #include "common.h"
 #include "list.h"
@@ -69,19 +70,19 @@ void sym_sort (uint_t kind)
 		{
 		symbol_t * sym = structof (symbol_t, node, node);
 
-		sym->use_count = sym->pos_count + sym->sym_count;
+		sym->use_count = sym->pos_count + sym->sym_count + sym->rep_pos;
 
 		switch (kind)
 			{
 			case SORT_ALL:
-				if (sym->rep_count > 1)
+				if (sym->repeat)
 					index->key = sym->rep_count * sym->size;
 				else
 					index->key = sym->use_count * sym->size;
 				break;
 
 			case SORT_REP:
-				if (sym->rep_count > 1)
+				if (sym->repeat)
 					{
 					index->key = 0;
 					break;
@@ -95,7 +96,7 @@ void sym_sort (uint_t kind)
 				break;
 
 			case SORT_GAIN:
-				index->key = sym->gain;
+				index->key = sym->repeat ? INT_MIN : sym->gain;
 				break;
 
 			default:
@@ -126,7 +127,6 @@ void sym_sort (uint_t kind)
 void sym_list (uint_t filter)
 	{
 	double entropy = 0.0;
-	uint use_count = 0;
 
 	puts ("SYMBOLS:");
 
@@ -137,11 +137,11 @@ void sym_list (uint_t filter)
 
 		if (filter == LIST_KEEP && !sym->keep) continue;
 
-		uint_t sym_dup = sym->pos_count + sym->sym_count;  // TODO: replace by sym->use_count
-		use_count += sym_dup;
-
-		double p = (double) sym_dup / (pos_count + sym_count);
-		entropy += -p * log2 (p);
+		if (!sym->repeat)
+			{
+			double p = (double) sym->use_count / (pos_count + sym_count);
+			entropy += -p * log2 (p);
+			}
 
 		printf ("[%u] base=%x", i, sym->base);
 
@@ -150,12 +150,14 @@ void sym_list (uint_t filter)
 		else
 			printf (" size=%u", sym->size);
 
-		if (sym->rep_count > 1)
-			printf (" rep=%u", sym->rep_count);
-		else
+		if (!sym->repeat)
+			{
 			printf (" pos=%u", sym->pos_count);
+			printf (" tree=%u", sym->sym_count);
+			printf (" rpos=%u", sym->rep_pos);
+			}
 
-		printf (" tree=%u", sym->sym_count);
+		printf (" rep=%u", sym->rep_count);
 
 		if (sym->cost)
 			printf (" gain=%i", sym->gain);
@@ -457,7 +459,7 @@ void crunch_rep ()
 	list_t * node_left = pos_root.next;
 	while ((node_left != pos_root.prev) && (node_left != &pos_root))
 		{
-		position_t * pos_left = (position_t *) node_left;  // node as first member
+		position_t * pos_left = structof (position_t, node, node_left);
 
 		symbol_t * sym_left = pos_left->sym;
 		symbol_t * sym_rep = NULL;
@@ -465,7 +467,7 @@ void crunch_rep ()
 		list_t * node_right = node_left->next;
 		while (node_right != &pos_root)
 			{
-			position_t * pos_right = (position_t *) node_right;  // node as first member
+			position_t * pos_right = structof (position_t, node, node_right);
 			symbol_t * sym_right = pos_right->sym;
 			if (sym_left != sym_right) break;
 
@@ -477,24 +479,27 @@ void crunch_rep ()
 				pos_left->pair = NULL;
 
 				sym_rep = sym_add ();
+				sym_rep->repeat = 1;
 
 				pos_left->sym = sym_rep;
 				sym_rep->pos_count = 1;
 				sym_left->pos_count--;
+				sym_left->rep_pos++;
 
 				sym_rep->rep_count = 1;
-				sym_left->rep_count = 1;  // repeated
+				sym_left->rep_count++;
 
+				sym_rep->code = sym_left->code;
+				sym_rep->base = sym_left->base;
 				sym_rep->size = sym_left->size;
 
 				sym_rep->left = sym_left;
-				sym_left->sym_count++;
 				}
 
 			sym_right->pos_count--;
 
 			sym_rep->rep_count++;
-			sym_rep->size += sym_right->size;
+			sym_right->rep_count++;
 
 			if (pos_right->pair) dec_pair (pos_right->pair);
 			// position will be crunched later
@@ -527,8 +532,8 @@ uint_t keep_dup ()
 		{
 		symbol_t * sym = structof (symbol_t, node, node);
 
-		sym->use_count = sym->pos_count + sym->sym_count;
-		if (sym->use_count > 1 || (sym->rep_count == 1 && sym->size > 1))
+		sym->use_count = sym->pos_count + sym->sym_count + sym->rep_pos;
+		if (sym->use_count > 1 || (!sym->repeat && sym->rep_count > 1))
 			{
 			// Duplicated or repeated symbols are presumed valuable
 			// until cost computation confirms or not
@@ -643,6 +648,67 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 
 	sym->cost = sym->keep ? ref_cost : use_cost;
 
+	return sym->keep ? keep_cost : drop_cost;
+	}
+
+
+// Compute symbol cost in RSE algorithm
+// Decide whether to define it (keep) or not (drop)
+
+uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select)
+	{
+	uint use_cost;
+	uint pos_cost;
+	uint def_cost;
+	uint drop_cost;
+
+	if (sym->size == 1)
+		{
+		// Base symbol
+
+		sym->len = 1;
+		use_cost = 1 + 8;  // 1 bit for base prefix '0' and 8 bits for base code
+		pos_cost = use_cost;
+		def_cost = use_cost;
+		// FIXME: add repetition header cost: 2 + cost_pref_odd (???)
+		// Approximated until fixed with all repeated twice (2 + 1)
+		// A base symbol can always be repeated
+		drop_cost = sym->pos_count * pos_cost + (sym->sym_count + sym->rep_pos) * use_cost + 3 * sym->rep_pos;
+		}
+	else
+		{
+		// Derived symbol
+
+		sym->len = sym->left->keep ? 1 : sym->left->len;
+		sym->len += sym->right->keep ? 1 : sym->right->len;
+
+		use_cost = sym->left->cost + sym->right->cost;
+		pos_cost = sym->left->pcost + sym->right->pcost;
+
+		def_cost = sym->len;  // len = number of next flags
+		// FIXME: add repetition header cost:  2 + cost_pref_odd (???)
+		// A derived symbol cannot be repeated if dropped
+		drop_cost = (sym->pos_count + sym->rep_count) * pos_cost + sym->sym_count * use_cost - use_cost;
+		}
+
+	// FIXME: add repetition header cost:  2 + cost_pref_odd (???)
+	// Approximated until fixed with all repeated twice (2 + 1)
+	// Any symbol can be repeated if kept
+	uint keep_cost = def_cost + sym->pos_count * (2 + ref_bit) + (sym->sym_count + sym->rep_pos) * (1 + ref_bit) + 3 * sym->rep_pos;
+
+	sym->gain = drop_cost - keep_cost;
+
+	// Keep or drop the symbol according to the cost gain
+
+	if (select)
+		{
+		uchar keep = (sym->gain > 0) ? 1 : 0;
+		sym->keep = keep;
+		keep_count += keep;
+		}
+
+	sym->cost = sym->keep ? (1 + ref_bit) : use_cost;
+	sym->pcost = sym->keep ? (2 + ref_bit) : pos_cost;
 	return sym->keep ? keep_cost : drop_cost;
 	}
 

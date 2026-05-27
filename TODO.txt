@@ -1,11 +1,11 @@
 TODO LIST
 
 Fix:
+- compute cost in RSE (not equal to output size : see FIXME)
 - in_eof() is not safe for small data
   test.txt makes it to fail
 
 Improvements:
-- cost optimization in RSE
 - if RSE > SE, try RSI
 - ref_bit as ambiant parameter (global)
 - repeat symbol also in tree
