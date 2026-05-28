@@ -26,13 +26,12 @@ The compressor repeatedly scans the sequence to find elementary patterns as
 symbol pairs, then replaces the most frequent & asymmetric pairs by derived
 symbols, thus building a binary tree of symbols and a reduced final sequence.
 
-When no more asymmetric pair is duplicated, the compressor reduces the tree,
-(including the repeated symbols), then serializes that tree plus the final
-sequence in a bit stream.
+When no more asymmetric pair is duplicated, the compressor serializes that
+tree plus the final sequence in a bit stream.
 
-For some algorithms (SE, SI), the encoding cost of the serialization is
-computed and an optimization loop selects the symbols that are worth to be
-defined in the dictionary.
+For some algorithms (SE, SI, RSE), the encoding cost of the serialization
+is computed and an optimization loop selects the symbols that are worth to
+be defined in the dictionary.
 
 As this dictionary is static, preceding (SE) or embedded (SI) in the final
 sequence, it saves the cost of dynamically rebuild it at decompression.
@@ -58,10 +57,11 @@ Already implemented:
 - encoding cost computation
 
 Result:
-- already good symbol ratio
-- already good decompression time
+- good symbol ratio
+- good decompression time
 - acceptable compression time
-- but still bad compression ratio
+- acceptable compression ratio for code
+- but bad compression ratio for data
 
 See TODO.txt for next steps.
 
@@ -86,7 +86,7 @@ P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4667  30899  37026
 SI           4601  30386  36242
-RSE          3637  32103  37915   Less efficient for code
+RSE          3637  32106  37916   Less efficient for code
 RSI          x     x      x
 PS           x     x      x
 RPS          x     x      x

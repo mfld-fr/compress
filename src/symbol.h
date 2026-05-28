@@ -89,6 +89,7 @@ extern uint_t pos_count;  // list of positions
 #define SORT_REP  1  // filter repeat out
 #define SORT_USE  2  // sort by usage count
 #define SORT_GAIN 3  // by gain
+#define SORT_BASE 4  // by frame order
 
 
 struct index_sym_s

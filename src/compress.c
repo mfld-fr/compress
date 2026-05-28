@@ -714,7 +714,7 @@ static void compress_si ()
 
 	if (opt_sym)
 		{
-		sym_sort (SORT_USE);
+		sym_sort (SORT_BASE);
 		sym_list (LIST_ALL);
 		}
 
@@ -976,7 +976,11 @@ static void compress_rse ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			if (!sym->repeat) cost += sym_cost_rse (sym, ref_bit, 0);  // no select
+			if (!sym->repeat)
+				cost += sym_cost_rse (sym, ref_bit, 0);  // no select
+			else if (sym->left->keep || sym->left->size == 1)
+				cost += 2 + cost_pref_odd (sym->rep_count - 2);
+
 			node = node->next;
 			}
 

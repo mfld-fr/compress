@@ -99,6 +99,11 @@ void sym_sort (uint_t kind)
 				index->key = sym->repeat ? INT_MIN : sym->gain;
 				break;
 
+
+			case SORT_BASE:
+				index->key = sym->repeat ? INT_MIN : -((sym->base << 4) + sym->size);
+				break;
+
 			default:
 				error (1, 0, "unknown sorting");
 			}
@@ -157,6 +162,7 @@ void sym_list (uint_t filter)
 			printf (" rpos=%u", sym->rep_pos);
 			}
 
+		printf (" use=%u", sym->use_count);
 		printf (" rep=%u", sym->rep_count);
 
 		if (sym->cost)
@@ -576,8 +582,8 @@ uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
 		{
 		// Derived symbol
 
-		sym->len = sym->left->keep ? 1 : sym->left->len;
-		sym->len += sym->right->keep ? 1 : sym->right->len;
+		sym->len = (sym->left->keep ? 1 : sym->left->len)
+			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
 		def_cost = sym->len;  // len = number of next flags
@@ -597,8 +603,14 @@ uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
 		keep_count += keep;
 		}
 
-	sym->cost = sym->keep ? ref_cost : use_cost;
-	return sym->keep ? keep_cost : drop_cost;
+	if (sym->keep)
+		{
+		sym->cost = ref_cost;
+		return keep_cost;
+		}
+
+	sym->cost = use_cost;
+	return drop_cost;
 	}
 
 // Compute symbol cost in SI algorithm
@@ -625,8 +637,8 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 		{
 		// Derived symbol
 
-		sym->len = sym->left->keep ? 1 : sym->left->len;
-		sym->len += sym->right->keep ? 1 : sym->right->len;
+		sym->len = (sym->left->keep ? 1 : sym->left->len)
+			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
 		def_cost = 2 + sym->len;  // len = number of next flags
@@ -646,9 +658,14 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 		keep_count += keep;
 		}
 
-	sym->cost = sym->keep ? ref_cost : use_cost;
+	if (sym->keep)
+		{
+		sym->cost = ref_cost;
+		return keep_cost;
+		}
 
-	return sym->keep ? keep_cost : drop_cost;
+	sym->cost = use_cost;
+	return drop_cost;
 	}
 
 
@@ -670,31 +687,26 @@ uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select)
 		use_cost = 1 + 8;  // 1 bit for base prefix '0' and 8 bits for base code
 		pos_cost = use_cost;
 		def_cost = use_cost;
-		// FIXME: add repetition header cost: 2 + cost_pref_odd (???)
-		// Approximated until fixed with all repeated twice (2 + 1)
 		// A base symbol can always be repeated
-		drop_cost = sym->pos_count * pos_cost + (sym->sym_count + sym->rep_pos) * use_cost + 3 * sym->rep_pos;
+		drop_cost = sym->pos_count * pos_cost + (sym->sym_count + sym->rep_pos) * use_cost;
 		}
 	else
 		{
 		// Derived symbol
 
-		sym->len = sym->left->keep ? 1 : sym->left->len;
-		sym->len += sym->right->keep ? 1 : sym->right->len;
+		sym->len = (sym->left->keep ? 1 : sym->left->len)
+			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
 		pos_cost = sym->left->pcost + sym->right->pcost;
 
 		def_cost = sym->len;  // len = number of next flags
-		// FIXME: add repetition header cost:  2 + cost_pref_odd (???)
 		// A derived symbol cannot be repeated if dropped
 		drop_cost = (sym->pos_count + sym->rep_count) * pos_cost + sym->sym_count * use_cost - use_cost;
 		}
 
-	// FIXME: add repetition header cost:  2 + cost_pref_odd (???)
-	// Approximated until fixed with all repeated twice (2 + 1)
 	// Any symbol can be repeated if kept
-	uint keep_cost = def_cost + sym->pos_count * (2 + ref_bit) + (sym->sym_count + sym->rep_pos) * (1 + ref_bit) + 3 * sym->rep_pos;
+	uint keep_cost = def_cost + sym->pos_count * (2 + ref_bit) + (sym->sym_count + sym->rep_pos) * (1 + ref_bit);
 
 	sym->gain = drop_cost - keep_cost;
 
@@ -707,9 +719,16 @@ uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select)
 		keep_count += keep;
 		}
 
-	sym->cost = sym->keep ? (1 + ref_bit) : use_cost;
-	sym->pcost = sym->keep ? (2 + ref_bit) : pos_cost;
-	return sym->keep ? keep_cost : drop_cost;
+	if (sym->keep)
+		{
+		sym->cost = 1 + ref_bit;
+		sym->pcost = 2 + ref_bit;
+		return keep_cost;
+		}
+
+	sym->cost = use_cost;
+	sym->pcost = pos_cost;
+	return drop_cost;
 	}
 
 //------------------------------------------------------------------------------

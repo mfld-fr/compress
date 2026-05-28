@@ -1,8 +1,7 @@
 TODO LIST
 
 Fix:
-- compute cost in RSE (not equal to output size : see FIXME)
-- in_eof() is not safe for small data
+- Function in_eof() is not safe for small data
   test.txt makes it to fail
 
 Improvements:
@@ -22,11 +21,3 @@ To explore:
 - length value as symbol ?
 - definition header as symbol ?
 - repeat header as symbol ?
-
-Huffman encoding experiment to compare with GZIP:
-- binary tree structure
-- binary tree coding
-- binary tree decoding
-- adaptative tree
-- symbol coding
-- lenght and repeat encoding ?
