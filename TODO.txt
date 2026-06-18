@@ -6,7 +6,6 @@ Fix:
 
 Improvements:
 - if RSE > SE, try RSI
-- ref_bit as ambiant parameter (global)
 - repeat symbol also in tree
 - automatic benchmarking
 

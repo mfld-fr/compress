@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "common.h"
+#include "list.h"
 
 // Symbol definitions
 
@@ -47,6 +49,7 @@ extern list_t sym_root;
 extern uint_t sym_count;
 
 extern uint keep_count;
+extern uchar ref_bit;
 
 
 // Pair definitions
@@ -90,6 +93,7 @@ extern uint_t pos_count;  // list of positions
 #define SORT_USE  2  // sort by usage count
 #define SORT_GAIN 3  // by gain
 #define SORT_BASE 4  // by frame order
+#define SORT_SIZE 5  // by size
 
 
 struct index_sym_s
@@ -124,8 +128,8 @@ void crunch_rep ();
 
 uint_t keep_dup ();
 
-uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select);
-uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select);
-uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select);
+uint sym_cost_se (symbol_t * sym, uchar select);
+uint sym_cost_si (symbol_t * sym, uchar select);
+uint sym_cost_rse (symbol_t * sym, uchar select);
 
 //------------------------------------------------------------------------------

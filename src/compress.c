@@ -7,6 +7,7 @@
 #include <error.h>
 #include <unistd.h>
 #include <limits.h>
+#include <stdlib.h>
 
 #include "common.h"
 #include "list.h"
@@ -51,6 +52,7 @@ uchar opt_time;
 uchar opt_verb;
 
 static uint base_count;
+static uint def_count;
 static uint ref_count;
 static uint rep_count;
 
@@ -354,51 +356,51 @@ static void expand_rpb ()
 // Compression with "symbol"
 // Prepended dictionary (external)
 
-static uchar out_child_se (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count, uchar pos);
+static uchar out_child_se (symbol_t * sym, uchar def_len, uchar def_now, uchar pos);
 
-static uchar out_sym_se (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count, uchar pos)
+static uchar out_sym_se (symbol_t * sym, uchar def_len, uchar def_now, uchar pos)
 	{
 	if (sym->keep)
 		{
 		// Insert the next flag inside a definition
-		if (def_len) out_bit ((def_count == def_len) ? 0 : 1);
+		if (def_len) out_bit ((def_now == def_len) ? 0 : 1);
 
 		if (pos) out_bit (1);
 		out_bit (1);  // index
 		out_code (sym->index, ref_bit);
 		ref_count++;
 
-		if (def_len) def_count++;
+		if (def_len) def_now++;
 		}
 	else
 		{
-		def_count = out_child_se (sym, ref_bit, def_len, def_count, pos);
+		def_now = out_child_se (sym, def_len, def_now, pos);
 		}
 
-	return def_count;
+	return def_now;
 	}
 
-static uchar out_child_se (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count, uchar pos)
+static uchar out_child_se (symbol_t * sym, uchar def_len, uchar def_now, uchar pos)
 	{
 	if (sym->size == 1)
 		{
 		// Insert next flag inside a definition
 		// No flag in a definition with a single base symbol
-		if (def_len > 1) out_bit ((def_count == def_len) ? 0 : 1);
+		if (def_len > 1) out_bit ((def_now == def_len) ? 0 : 1);
 
 		out_bit (0);  // base
 		out_code (sym->code, 8);
 		base_count++;
 
-		if (def_len) def_count++;
+		if (def_len) def_now++;
 		}
 	else
 		{
-		def_count = out_sym_se (sym->left, ref_bit, def_len, def_count, pos);
-		def_count = out_sym_se (sym->right, ref_bit, def_len, def_count, pos);
+		def_now = out_sym_se (sym->left, def_len, def_now, pos);
+		def_now = out_sym_se (sym->right, def_len, def_now, pos);
 		}
 
-	return def_count;
+	return def_now;
 	}
 
 
@@ -452,7 +454,7 @@ static void compress_se ()
 	keep_count = keep_dup ();
 
 	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
-	uchar ref_bit = log2u (keep_count - 1);
+	ref_bit = log2u (keep_count - 1);
 
 	uchar best_bit = UCHAR_MAX;
 	uint best_keep = UINT_MAX;
@@ -474,7 +476,7 @@ static void compress_se ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			sym_cost_se (sym, ref_bit, 1);  // select
+			sym_cost_se (sym, 1);  // select
 			node = node->next;
 			}
 
@@ -506,11 +508,11 @@ static void compress_se ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			cost += sym_cost_se (sym, ref_bit, 0);  // no select
+			cost += sym_cost_se (sym, 0);  // no select
 			node = node->next;
 			}
 
-		if (opt_verb) printf ("Total cost: %u bytes\n\n", cost / 8);
+		if (opt_verb) printf ("Frame cost: %u bytes\n\n", cost / 8);
 
 		// No need to go further when cost increases
 		if (cost >= min_cost) break;
@@ -536,6 +538,8 @@ static void compress_se ()
 	if (opt_verb) printf ("Best bits: %u\n\n", best_bit);
 
 	// Restore the best selection
+
+	ref_bit = best_bit;
 
 	node = sym_root.next;
 	while (node != &sym_root)
@@ -563,12 +567,14 @@ static void compress_se ()
 		symbol_t * sym = structof (symbol_t, node, node);
 		if (sym->keep)
 			{
-			out_child_se (sym, best_bit, sym->len, 1, 0);  // inside a definition
+			out_child_se (sym, sym->len, 1, 0);  // inside a definition
 			sym->index = index_count++;
 			}
 
 		node = node->next;
 		}
+
+	def_count = best_keep;
 
 	// Output frame
 
@@ -576,7 +582,7 @@ static void compress_se ()
 	while (node != &pos_root)
 		{
 		position_t * pos = structof (position_t, node, node);
-		out_sym_se (pos->sym, best_bit, 0, 0, 0);  // outside a definition
+		out_sym_se (pos->sym, 0, 0, 0);  // outside a definition
 		node = node->next;
 		}
 
@@ -589,8 +595,8 @@ static void compress_se ()
 
 static void expand_se ()
 	{
-	uint_t def_count = 1 + in_pref_odd ();
-	uchar_t ref_bit = log2u (def_count - 1);
+	def_count = 1 + in_pref_odd ();
+	ref_bit = log2u (def_count - 1);
 
 	for (uint_t i = 0; i < def_count; i++)
 		{
@@ -621,6 +627,8 @@ static void expand_se ()
 
 	while (1)
 		{
+		// FIXME: not safe for small data
+		// as remaining bits can be useful
 		if (in_eof ()) break;
 
 		if (in_bit (1))  // index
@@ -640,14 +648,14 @@ static void expand_se ()
 // Compression with "symbol"
 // Embedded dictionary (internal)
 
-static uchar out_child_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count);
+static uchar out_child_si (symbol_t * sym, uchar def_len, uchar def_now);
 
-static uchar out_sym_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count)
+static uchar out_sym_si (symbol_t * sym, uchar def_len, uchar def_now)
 	{
 	if (sym->keep)
 		{
 		// Insert the next flag inside a definition
-		if (def_len) out_bit ((def_count == def_len) ? 0 : 1);
+		if (def_len) out_bit ((def_now == def_len) ? 0 : 1);
 
 		if (sym->pass == 0)
 			{
@@ -658,7 +666,7 @@ static uchar out_sym_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar d
 			out_bit (1);
 			out_bit (0);
 
-			out_child_si (sym, ref_bit, sym->len, 1);
+			out_child_si (sym, sym->len, 1);
 
 			sym->index = index_count++;
 			}
@@ -672,17 +680,17 @@ static uchar out_sym_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar d
 			ref_count++;
 			}
 
-		if (def_len) def_count++;
+		if (def_len) def_now++;
 		}
 	else
 		{
-		def_count = out_child_si (sym, ref_bit, def_len, def_count);
+		def_now = out_child_si (sym, def_len, def_now);
 		}
 
-	return def_count;
+	return def_now;
 	}
 
-static uchar out_child_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar def_count)
+static uchar out_child_si (symbol_t * sym, uchar def_len, uchar def_now)
 	{
 	if (sym->size == 1)
 		{
@@ -690,21 +698,21 @@ static uchar out_child_si (symbol_t * sym, uchar_t ref_bit, uchar def_len, uchar
 
 		// Insert next flag inside a definition
 		// No flag in a definition with a single base symbol
-		if (def_len > 1) out_bit ((def_count == def_len) ? 0 : 1);
+		if (def_len > 1) out_bit ((def_now == def_len) ? 0 : 1);
 
 		out_bit (0);
 		out_code (sym->code, 8);
 		base_count++;
 
-		if (def_len > 1) def_count++;
+		if (def_len > 1) def_now++;
 		}
 	else
 		{
-		def_count = out_sym_si (sym->left,  ref_bit, def_len, def_count);
-		def_count = out_sym_si (sym->right, ref_bit, def_len, def_count);
+		def_now = out_sym_si (sym->left,  def_len, def_now);
+		def_now = out_sym_si (sym->right, def_len, def_now);
 		}
 
-	return def_count;
+	return def_now;
 	}
 
 
@@ -714,7 +722,7 @@ static void compress_si ()
 
 	if (opt_sym)
 		{
-		sym_sort (SORT_BASE);
+		sym_sort (SORT_ALL);
 		sym_list (LIST_ALL);
 		}
 
@@ -723,7 +731,7 @@ static void compress_si ()
 
 	keep_count = keep_dup ();
 	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
-	uchar ref_bit = log2u (keep_count - 1);
+	ref_bit = log2u (keep_count - 1);
 
 	uchar best_bit = UCHAR_MAX;
 	uint min_cost = UINT_MAX;
@@ -744,7 +752,7 @@ static void compress_si ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			sym_cost_si (sym, ref_bit, 1);  // 1 = select
+			sym_cost_si (sym, 1);  // 1 = select
 			node = node->next;
 			}
 
@@ -776,7 +784,7 @@ static void compress_si ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			cost += sym_cost_si (sym, ref_bit, 0);  // 0 = no select
+			cost += sym_cost_si (sym, 0);  // 0 = no select
 			node = node->next;
 			}
 
@@ -806,6 +814,8 @@ static void compress_si ()
 
 	// Restore the best selection
 
+	ref_bit = best_bit;
+
 	node = sym_root.next;
 	while (node != &sym_root)
 		{
@@ -817,13 +827,13 @@ static void compress_si ()
 
 	// Output the best selection
 
-	out_pref_odd (best_bit - 1);
+	out_pref_odd (ref_bit - 1);
 
 	node = pos_root.next;
 	while (node != &pos_root)
 		{
 		position_t * pos = structof (position_t, node, node);
-		out_sym_si (pos->sym, best_bit, 0, 0);  // 0 = currently outside a definition
+		out_sym_si (pos->sym, 0, 0);  // 0 = currently outside a definition
 		node = node->next;
 		}
 
@@ -834,7 +844,7 @@ static void compress_si ()
 // Decompression with "symbol"
 // Embedded dictionary (internal)
 
-static uint_t in_elem (uchar_t ref_bit)
+static uint_t in_elem ()
 	{
 	uint_t size;
 
@@ -871,7 +881,7 @@ static uint_t in_elem (uchar_t ref_bit)
 				uchar flag = in_bit (0);  // no shift - keep bit in input
 				// No next flag in a definition with a single base symbol
 				if (count || flag) in_bit (1);
-				size += in_elem (ref_bit);
+				size += in_elem ();
 				if (!flag) break;  // was last symbol
 				count++;
 				}
@@ -890,14 +900,14 @@ static uint_t in_elem (uchar_t ref_bit)
 
 static void expand_si ()
 	{
-	uchar_t bit_len = 1 + in_pref_odd ();
+	ref_bit = 1 + in_pref_odd ();
 
 	while (1)
 		{
 		// FIXME: not safe for small data
 		// as remaining bits can be useful
 		if (in_eof ()) break;
-		in_elem (bit_len);
+		in_elem ();
 		}
 	}
 
@@ -922,7 +932,7 @@ static void compress_rse ()
 	keep_count = keep_dup ();
 
 	if (opt_verb) printf ("Duplicated symbols: %u\n\n", keep_count);
-	uchar ref_bit = log2u (keep_count - 1);
+	ref_bit = log2u (keep_count - 1);
 
 	uchar best_bit = UCHAR_MAX;
 	uint best_keep = UINT_MAX;
@@ -944,7 +954,7 @@ static void compress_rse ()
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			if (!sym->repeat) sym_cost_rse (sym, ref_bit, 1);  // select
+			if (!sym->repeat) sym_cost_rse (sym, 1);  // select
 			node = node->next;
 			}
 
@@ -977,14 +987,14 @@ static void compress_rse ()
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
 			if (!sym->repeat)
-				cost += sym_cost_rse (sym, ref_bit, 0);  // no select
+				cost += sym_cost_rse (sym, 0);  // no select
 			else if (sym->left->keep || sym->left->size == 1)
 				cost += 2 + cost_pref_odd (sym->rep_count - 2);
 
 			node = node->next;
 			}
 
-		if (opt_verb) printf ("Total cost: %u bytes\n\n", cost / 8);
+		if (opt_verb) printf ("Frame cost: %u bytes\n\n", cost / 8);
 
 		// No need to go further when cost increases
 		if (cost >= min_cost) break;
@@ -1011,6 +1021,8 @@ static void compress_rse ()
 
 	// Restore the best selection
 
+	ref_bit = best_bit;
+
 	node = sym_root.next;
 	while (node != &sym_root)
 		{
@@ -1030,12 +1042,14 @@ static void compress_rse ()
 		symbol_t * sym = structof (symbol_t, node, node);
 		if (sym->keep)
 			{
-			out_child_se (sym, best_bit, sym->len, 1, 0);  // inside a definition
+			out_child_se (sym, sym->len, 1, 0);  // inside a definition
 			sym->index = index_count++;
 			}
 
 		node = node->next;
 		}
+
+	def_count = best_keep;
 
 	node = pos_root.next;
 	while (node != &pos_root)
@@ -1055,15 +1069,15 @@ static void compress_rse ()
 				out_bit (1);  // repeat
 				out_bit (0);
 				out_pref_odd (rep - 2);
-				out_sym_se (sym, best_bit, 0, 0, 0);  // outside a definition - in repeat
+				out_sym_se (sym, 0, 0, 0);  // outside a definition - in repeat
 				rep_count++;
 				}
 			else for (uint r = 0; r < rep; r++)
-				out_sym_se (sym, best_bit, 0, 0, 1);  // outside a definition - at position
+				out_sym_se (sym, 0, 0, 1);  // outside a definition - at position
 			}
 		else
 			{
-			out_sym_se (sym, best_bit, 0, 0, 1);  // outside a definition - at position
+			out_sym_se (sym, 0, 0, 1);  // outside a definition - at position
 			}
 
 		node = node->next;
@@ -1078,8 +1092,8 @@ static void compress_rse ()
 
 static void expand_rse ()
 	{
-	uint_t def_count = 1 + in_pref_odd ();
-	uchar_t ref_bit = log2u (def_count - 1);
+	def_count = 1 + in_pref_odd ();
+	ref_bit = log2u (def_count - 1);
 
 	// TODO: regroup the dictionary load with SE
 
@@ -1112,6 +1126,8 @@ static void expand_rse ()
 
 	while (1)
 		{
+		// FIXME: not safe for small data
+		// as remaining bits can be useful
 		if (in_eof ()) break;
 
 		if (in_bit (1))
@@ -1289,7 +1305,7 @@ int main (int argc, char * argv [])
 					break;
 
 				default:
-					compress_se ();
+					compress_rse ();
 					break;
 
 				}
@@ -1301,6 +1317,7 @@ int main (int argc, char * argv [])
 				printf ("Frame size: %u\n", size_out);
 
 				printf ("Base count: %u\n", base_count);
+				printf ("Def count: %u\n", def_count);
 				printf ("Ref count: %u\n", ref_count);
 				printf ("Rep count: %u\n", rep_count);
 

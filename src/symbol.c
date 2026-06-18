@@ -26,6 +26,7 @@ index_sym_t index_sym [SYMBOL_MAX];
 uint_t index_count;
 
 uint keep_count;
+uchar ref_bit;
 
 
 // Local data
@@ -99,9 +100,12 @@ void sym_sort (uint_t kind)
 				index->key = sym->repeat ? INT_MIN : sym->gain;
 				break;
 
-
 			case SORT_BASE:
 				index->key = sym->repeat ? INT_MIN : -((sym->base << 4) + sym->size);
+				break;
+
+			case SORT_SIZE:
+				index->key = sym->repeat ? INT_MIN : -sym->size;
 				break;
 
 			default:
@@ -135,6 +139,7 @@ void sym_list (uint_t filter)
 
 	puts ("SYMBOLS:");
 
+	uint keep_index = 0;
 	for (uint_t i = 0; i < sym_count; i++)
 		{
 		index_sym_t * index = index_sym + i;
@@ -144,11 +149,13 @@ void sym_list (uint_t filter)
 
 		if (!sym->repeat)
 			{
+			// FIXME: global counts distorted by repeat symbols
 			double p = (double) sym->use_count / (pos_count + sym_count);
 			entropy += -p * log2 (p);
 			}
 
-		printf ("[%u] base=%x", i, sym->base);
+		printf ("[%u]", (filter == LIST_KEEP) ? keep_index : i);
+		printf (" base=%x", sym->base);
 
 		if (sym->size == 1)
 			printf (" code=%hx", sym->code);
@@ -169,6 +176,8 @@ void sym_list (uint_t filter)
 			printf (" gain=%i", sym->gain);
 
 		puts ("");
+
+		keep_index++;
 		}
 
 	printf ("\nEntropy: %f\n\n", entropy);
@@ -561,7 +570,7 @@ uint_t keep_dup ()
 // Compute symbol cost in SE algorithm
 // Decide whether to define it (keep) or not (drop)
 
-uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
+uint sym_cost_se (symbol_t * sym, uchar select)
 	{
 	uint use_cost;
 	uint def_cost;
@@ -616,7 +625,7 @@ uint sym_cost_se (symbol_t * sym, uint ref_bit, uchar select)
 // Compute symbol cost in SI algorithm
 // Decide whether to define it (keep) or not (drop)
 
-uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
+uint sym_cost_si (symbol_t * sym, uchar select)
 	{
 	uint use_cost;
 	uint def_cost;
@@ -641,12 +650,11 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
-		def_cost = 2 + sym->len;  // len = number of next flags
+		def_cost = 2 + sym->len;  // number of next flags = len
 		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 
 	uint keep_cost = def_cost + (sym->use_count - 1) * ref_cost;
-
 	sym->gain = drop_cost - keep_cost;
 
 	// Keep or drop the symbol according to the cost gain
@@ -672,7 +680,7 @@ uint sym_cost_si (symbol_t * sym, uint ref_bit, uchar select)
 // Compute symbol cost in RSE algorithm
 // Decide whether to define it (keep) or not (drop)
 
-uint sym_cost_rse (symbol_t * sym, uint ref_bit, uchar select)
+uint sym_cost_rse (symbol_t * sym, uchar select)
 	{
 	uint use_cost;
 	uint pos_cost;
