@@ -739,56 +739,78 @@ static void compress_si ()
 	// Iterate on the reference bits down to 0 to get the best one
 
 	list_t * node;
+	uint keep_save = keep_count;
 
 	while (ref_bit > 0)
 		{
 		if (opt_verb) printf ("Reference bits: %u\n", ref_bit);
 
-		// Compute the symbol costs
-
-		keep_count = 0;
+		// Save the symbol states
 
 		node = sym_root.next;
 		while (node != &sym_root)
 			{
 			symbol_t * sym = structof (symbol_t, node, node);
-			sym_cost_si (sym, 1);  // 1 = select
+			sym->save_count = sym->sym_count;
+			sym->save_keep = sym->keep;
+			node = node->next;
+			}
+
+		// Drop the base symbols when too many index bits
+
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = structof (symbol_t, node, node);
+			if (sym->size == 1 && ref_bit > 6)
+				{
+				if (sym->keep) keep_count--;
+				sym->keep = 0;
+				}
+
 			node = node->next;
 			}
 
 		if (opt_verb) printf ("Worth symbols: %u\n", keep_count);
 
-		// Discard worthless
-
-		sym_sort (SORT_GAIN);
-
 		uint keep_max = 1 << ref_bit;
-		if (keep_count > keep_max)
+		uint cost = 0;
+
+		while (1)
 			{
-			for (uint i = keep_max; i < keep_count; i++)
+			// Compute the symbol costs and gains
+
+			symbol_t * sym_min = NULL;
+			int gain_min = INT_MAX;
+			cost = 0;
+
+			node = sym_root.next;
+			while (node != &sym_root)
 				{
-				index_sym_t * index = index_sym + i;
-				symbol_t * sym = index->sym;
-				sym->keep = 0;
+				symbol_t * sym = structof (symbol_t, node, node);
+				cost += sym_cost_si (sym);
+				if (sym->keep && sym->gain < gain_min)
+					{
+					sym_min = sym;
+					gain_min = sym->gain;
+					}
+
+				node = node->next;
 				}
 
-			keep_count = keep_max;
+			if (keep_count <= keep_max) break;
+
+			sym_min->keep = 0;
+			keep_count--;
+
+			sym_drop (sym_min, sym_min->use_count - 1);
 			}
 
-		if (opt_verb) printf ("Kept symbols: %u\n", keep_count);
-
-		// Recompute the symbol costs
-
-		uint cost = 0;
-		node = sym_root.next;
-		while (node != &sym_root)
+		if (opt_verb)
 			{
-			symbol_t * sym = structof (symbol_t, node, node);
-			cost += sym_cost_si (sym, 0);  // 0 = no select
-			node = node->next;
+			printf ("Kept symbols: %u\n", keep_count);
+			printf ("Frame cost: %u bytes\n\n", cost / 8);
 			}
-
-		if (opt_verb) printf ("Total cost: %u bytes\n\n", cost / 8);
 
 		// No need to go further when cost increases
 		if (cost >= min_cost) break;
@@ -806,6 +828,20 @@ static void compress_si ()
 			sym->best_len = sym->len;
 			node = node->next;
 			}
+
+		// Restore the symbol states
+
+		node = sym_root.next;
+		while (node != &sym_root)
+			{
+			symbol_t * sym = structof (symbol_t, node, node);
+			sym->sym_count = sym->save_count;
+			sym->use_count = sym->pos_count + sym->sym_count;
+			sym->keep = sym->save_keep;
+			node = node->next;
+			}
+
+		keep_count = keep_save;
 
 		ref_bit--;
 		}

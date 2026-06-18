@@ -567,6 +567,26 @@ uint_t keep_dup ()
 	}
 
 
+// Dropping a symbol in the tree makes it "transparent"
+// i.e. increases the usage counts of its kept children
+
+void sym_drop (symbol_t * sym, uint increment)
+	{
+	// Stop propagating the increment at kept or leaf symbol
+	if (sym->keep || sym->size == 1)
+		{
+		sym->sym_count += increment;
+		sym->use_count = sym->pos_count + sym->sym_count;
+		}
+	else
+		{
+		// Propagate the increment to children
+		sym_drop (sym->left, increment);
+		sym_drop (sym->right, increment);
+		}
+	}
+
+
 // Compute symbol cost in SE algorithm
 // Decide whether to define it (keep) or not (drop)
 
@@ -595,7 +615,7 @@ uint sym_cost_se (symbol_t * sym, uchar select)
 			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
-		def_cost = sym->len;  // len = number of next flags
+		def_cost = sym->len;  // number of next flags = definition length
 		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 
@@ -625,7 +645,7 @@ uint sym_cost_se (symbol_t * sym, uchar select)
 // Compute symbol cost in SI algorithm
 // Decide whether to define it (keep) or not (drop)
 
-uint sym_cost_si (symbol_t * sym, uchar select)
+uint sym_cost_si (symbol_t * sym)
 	{
 	uint use_cost;
 	uint def_cost;
@@ -650,21 +670,12 @@ uint sym_cost_si (symbol_t * sym, uchar select)
 			+ (sym->right->keep ? 1 : sym->right->len);
 
 		use_cost = sym->left->cost + sym->right->cost;
-		def_cost = 2 + sym->len;  // number of next flags = len
+		def_cost = 2 + sym->len;  // number of next flags = definition length
 		drop_cost = (sym->use_count - 1) * use_cost;
 		}
 
 	uint keep_cost = def_cost + (sym->use_count - 1) * ref_cost;
 	sym->gain = drop_cost - keep_cost;
-
-	// Keep or drop the symbol according to the cost gain
-
-	if (select)
-		{
-		uchar keep = (sym->gain > 0) ? 1 : 0;
-		sym->keep = keep;
-		keep_count += keep;
-		}
 
 	if (sym->keep)
 		{
@@ -673,7 +684,7 @@ uint sym_cost_si (symbol_t * sym, uchar select)
 		}
 
 	sym->cost = use_cost;
-	return drop_cost;
+	return (sym->size == 1) ? drop_cost : 0;
 	}
 
 
@@ -708,7 +719,7 @@ uint sym_cost_rse (symbol_t * sym, uchar select)
 		use_cost = sym->left->cost + sym->right->cost;
 		pos_cost = sym->left->pcost + sym->right->pcost;
 
-		def_cost = sym->len;  // len = number of next flags
+		def_cost = sym->len;  // number of next flags = definition length
 		// A derived symbol cannot be repeated if dropped
 		drop_cost = (sym->pos_count + sym->rep_count) * pos_cost + sym->sym_count * use_cost - use_cost;
 		}

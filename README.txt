@@ -11,6 +11,10 @@ The main goal is to save storage space on the target, by compressing at most the
 read-only data on the host, and to decompress it on the target at the lowest
 cost, with a limited impact on the load time.
 
+Several algorithms are explored, from the simplest to some more sophisticated,
+as a journey in the world of the data compression. Comparing these algorithms
+helps to understand some critical points in designing an efficient compressor.
+
 Inspired by the famous & venerable Exomizer:
 https://github.com/bitshifters/exomizer
 
@@ -19,8 +23,8 @@ DESIGN
 
 Because of small data sizes on the target, compression is performed on the
 whole initial sequence of base symbols (as byte codes). This gives a better
-symbol ratio, but requires more computation than the algorithms using a
-sliding window like LZ* (these are better suited for long data streams).
+symbol analysis, but requires more computation than the algorithms using a
+sliding window like LZ77 (these are better suited for long data streams).
 
 The compressor repeatedly scans the sequence to find elementary patterns as
 symbol pairs, then replaces the most frequent & asymmetric pairs by derived
@@ -33,7 +37,7 @@ For some algorithms (SE, SI, RSE), the encoding cost of the serialization
 is computed and an optimization loop selects the symbols that are worth to
 be defined in the dictionary.
 
-As this dictionary is static, preceding (SE) or embedded (SI) in the final
+As this dictionary is static, preceding (E) or embedded (I) in the final
 sequence, it saves the cost of dynamically rebuild it at decompression.
 
 Predefined prefixed coding is prefered to Huffman or arithmetic ones to keep
@@ -57,7 +61,7 @@ Already implemented:
 - encoding cost computation
 
 Result:
-- good symbol ratio
+- good symbol analysis
 - good decompression time
 - acceptable compression time
 - acceptable compression ratio for code
@@ -85,7 +89,7 @@ R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4667  30899  37026
-SI           4601  30386  36242
+SI           4601  30373  36155
 RSE          3637  32106  37916   Less efficient for code
 RSI          x     x      x
 PS           x     x      x

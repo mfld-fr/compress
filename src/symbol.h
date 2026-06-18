@@ -30,6 +30,9 @@ struct symbol_s
 	uint    pcost;  // position cost (for RSE)
 	int     gain;   // gain when defined
 
+	uchar save_keep;
+	uint  save_count;
+
 	uchar best_keep;  // save best selection
 	uint  best_len;
 
@@ -127,9 +130,10 @@ void crunch_word ();
 void crunch_rep ();
 
 uint_t keep_dup ();
+void sym_drop (symbol_t * sym, uint count);
 
 uint sym_cost_se (symbol_t * sym, uchar select);
-uint sym_cost_si (symbol_t * sym, uchar select);
+uint sym_cost_si (symbol_t * sym);
 uint sym_cost_rse (symbol_t * sym, uchar select);
 
 //------------------------------------------------------------------------------
