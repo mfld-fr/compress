@@ -1,7 +1,14 @@
+# Eclipse stuff
 /.settings/
+/.project
+/.cproject
+
+# Build artifacts
 /Debug/
 /Release/
 /gmon.out
+
+# Test artifacts
 /test_in.*
 /test_out.*
 /data.bin*

@@ -2,7 +2,28 @@
 
 PROG = Release/compress
 
-.PHONY: test
+CC = gcc
+CFLAGS = -O3 -Wall
+
+SRCS = src/compress.c src/list.c src/stream.c src/symbol.c
+OBJS = Release/src/compress.o Release/src/list.o Release/src/stream.o Release/src/symbol.o
+
+.PHONY: all build test clean
+
+# Build rules
+all: build
+
+build: $(PROG)
+
+$(PROG): $(OBJS)
+	@echo "Linking $@"
+	mkdir -p Release
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+Release/src/%.o: src/%.c
+	@echo "Compiling $<"
+	mkdir -p Release/src
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Macro to test a file
 # $(1): algorithm name
@@ -53,4 +74,8 @@ test_si:
 test_rse:
 	$(call TEST_ALGO,rse)
 
-test: test_b test_rb test_pb test_rpb test_se test_si test_rse
+test: build test_b test_rb test_pb test_rpb test_se test_si test_rse
+
+clean:
+	rm -rf Release/src/*.o Release/src/*.d $(PROG)
+	rm -f test_out.bin test_in.bin

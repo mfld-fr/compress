@@ -64,7 +64,7 @@ Result:
 - good symbol analysis
 - good decompression time
 - acceptable compression time
-- acceptable compression ratio for code
+- acceptable compression ratio for code (comparable to gzip)
 - but bad compression ratio for data
 
 See TODO.txt for next steps.
@@ -89,7 +89,7 @@ R(epeat)B    5647  48713  55944   Not efficient for code
 P(refix)B    4840  41659  48955
 RPB          4752  43472  50479   Less efficient for code
 S(ymbol)E    4667  30899  37026
-SI           4601  30373  36155
+SI           4496  30056  35828
 RSE          3637  32106  37916   Less efficient for code
 RSI          x     x      x
 PS           x     x      x

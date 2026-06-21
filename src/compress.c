@@ -669,6 +669,11 @@ static uchar out_sym_si (symbol_t * sym, uchar def_len, uchar def_now)
 			out_child_si (sym, sym->len, 1);
 
 			sym->index = index_count++;
+
+			// Adapt reference bits to number of definitions
+			if (index_count > (1 << ref_bit))
+				ref_bit++;
+
 			}
 		else
 			{
@@ -863,7 +868,9 @@ static void compress_si ()
 
 	// Output the best selection
 
-	out_pref_odd (ref_bit - 1);
+	// Adapt reference bits to number of definitions
+	index_count = 0;
+	ref_bit = 0;
 
 	node = pos_root.next;
 	while (node != &pos_root)
@@ -874,6 +881,8 @@ static void compress_si ()
 		}
 
 	out_pad ();
+
+	def_count = index_count;
 	}
 
 
@@ -927,6 +936,11 @@ static uint_t in_elem ()
 			elem_t * elem = elements + elem_count++;
 			elem->base = base;
 			elem->size = size;
+
+			// Adapt reference bits to number of definitions
+			if (elem_count > (1 << ref_bit))
+				ref_bit++;
+
 			}
 		}
 
@@ -936,7 +950,8 @@ static uint_t in_elem ()
 
 static void expand_si ()
 	{
-	ref_bit = 1 + in_pref_odd ();
+	// Adapt reference bits to number of definitions
+	ref_bit = 0;
 
 	while (1)
 		{

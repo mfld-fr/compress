@@ -1,8 +1,7 @@
 TODO LIST
 
 Fix:
-- Function in_eof() is not safe for small data
-  test.txt makes it to fail
+- Function in_eof() is not safe for small data like "aabcaabdab"
 
 Improvements:
 - if RSE > SE, try RSI
